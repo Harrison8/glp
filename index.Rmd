@@ -1,0 +1,754 @@
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(classInt)
+library(ggthemes)
+library(reshape2)
+library(tidyverse)
+library(plotly)
+
+source('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/graphing_functions.R')
+
+select <- function(...){dplyr::select(...)}
+```
+
+# Deep Driver Deep Dive
+
+This document includes data centered around our deep driver metrics.
+
+We have been looking at a really large spread of metrics over the last month or so. This document is a more in-depth approach to the deep drivers. As is tradition, it is really heavy on Education and Jobs and relatively light on QOP and health.
+
+# **Bachelor Degrees: Ages 25-64**
+
+Louisville has made slight progress against its peers in terms of Bachelor degree attainment among all working age adults. Changes among young adults and associate degree holders are more noticable than among all adults, and progress is more steady among white residents.
+
+**Compared to our peer cities, our white residents are catching up and black residents are falling behind.**
+
+```{r educ_data, include = FALSE}
+educ_data <- read_csv('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/output data/education_data_fips.csv')
+```
+
+## Ranking
+
+Compared to its peers, Louisville is poorly educated. We rank below the middle of the pack. 2015 was an exceptionally favorable year for us, and our high ranking is likely due to survey error. Our ranking in 2016 seemed to also be slightly below what we would expect (especially pronounced among young adults). The 2017 data will shed some light on which is more accurate.
+```{r, warning=FALSE}
+rank_and_nb_group(
+  educ_data[educ_data$year == 2015,],
+  'per_25_64_bach_plus',
+  plot_title = "Bachelor Degrees, 2015")
+
+rank_and_nb_group(
+  educ_data[educ_data$year == 2016,],
+  'per_25_64_bach_plus',
+  plot_title = "Bachelor Degrees, 2016")
+```
+
+##Trendline
+We have made incremental progress toward our peer city mean, though we still fall short.
+```{r, warning = FALSE, fig.width = 10}
+graph_trendline(
+  educ_data,
+  plot_title = 'Bachelor Degrees, Ages 25-64',
+  'per_25_64_bach_plus',
+  xmin = 2000,
+  xmax = 2016)
+```
+
+##Change relative to peers
+
+Knoxville and Tulsa have performed the best and worst among our current peer group since 2005.
+```{r, warning = FALSE, message = FALSE, fig.width = 9}
+educ_data_change <-
+  educ_data %>%
+  filter(current == 1) %>%
+  filter(year > 2000) %>%
+  group_by(city) %>%
+  mutate(change = per_25_64_bach_plus - first(per_25_64_bach_plus)) %>%
+  ungroup() %>%
+  mutate(lou = if_else(city == 'Louisville', 0, 3),
+         max_change = max(change[year == 2016]),
+         min_change = min(change[year == 2016])) %>%
+  group_by(city) %>%
+  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
+         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
+  ungroup() %>%
+  transmute(year,
+            city,
+            per_25_64_bach_plus,
+            change,
+            type = lou,
+            type = replace(type, max_city == 1, 1),
+            type = replace(type, min_city == 1, 2),
+            type = factor(type, labels = c("Louisville",
+                                           city[max_city==1&year==2016],
+                                           city[min_city==1&year==2016],
+                                           "Peer Average"))) %>%
+  group_by(type, year) %>%
+  summarise_all(mean, na.rm = TRUE)
+
+cPalette <- c("#00a9b7", "#47d110", "#d60000", "grey50")
+
+gggraph <- ggplot(educ_data_change, 
+       aes(x = year, y = per_25_64_bach_plus, color = type, alpha = type)) + 
+  geom_line() +
+  scale_colour_manual(
+    values = cPalette,
+    labels = c("city", "Louisville", "Max", "Min")) +
+  scale_alpha_manual(
+      values = c(1, 1, 1, .3),
+      labels =  c("city", "Louisville", "Max", "Min")) + 
+  theme(legend.title=element_blank()) + 
+  labs(title = 'Best and Worst Performing Cities',
+       x = 'year',
+       y = 'percentage points')
+  
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "%")
+}
+
+graph
+```
+
+This graph is very similar to the one above, except all cities begin at 0. This hones in on the amount of change we've seen in Louisville and filters out the fact that we start at a different place than our peer cities. The y-axis shows the percentage-point change since 2005. Here, Louisville is in line with that of our peer cities, assuming the true percentage of bachelor degree holders lies somewhere between the 2015 ands 2016 estimates.
+```{r, warning = FALSE, message = FALSE, fig.width = 9}
+gggraph <- ggplot(educ_data_change, 
+       aes(x = year, y = change, color = type, alpha = type)) + 
+  geom_line() +
+  scale_colour_manual(
+    values = cPalette,
+    labels = c("city", "Louisville", "Max", "Min")) +
+  scale_alpha_manual(
+      values = c(1, 1, 1, .3),
+      labels =  c("city", "Louisville", "Max", "Min")) + 
+  theme(legend.title=element_blank()) + 
+  labs(title = 'Percent Change (all cities start at 0)',
+       x = 'year',
+       y = 'percentage points')
+  
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "%")
+}
+
+graph
+
+```
+
+
+##By Race
+
+Here, the top cluster of lines represents white residents and the bottom cluster represents black residents. We generally perform poorly in both.
+```{r, fig.width = 9, message = FALSE}
+educ_data_race <- educ_data %>%
+  filter(current == 1) %>%
+  filter(year > 2000) %>%
+  {
+    x <- .
+    bind_cols(
+      x %>% filter(city == 'Louisville'),
+      x %>% filter(city != 'Louisville') %>%
+            group_by(year) %>%
+            summarise(first_quarter_w = quantile(bach_plus_per_white, prob = 0.25, na.rm = TRUE),
+                      mean_w = mean(bach_plus_per_white, na.rm = TRUE),
+                      third_quarter_w = quantile(bach_plus_per_white, prob = 0.75, na.rm = TRUE),
+                      first_quarter_b = quantile(bach_plus_per_black, prob = 0.25, na.rm = TRUE),
+                      mean_b = mean(bach_plus_per_black, na.rm = TRUE),
+                      third_quarter_b = quantile(bach_plus_per_black, prob = 0.75, na.rm = TRUE)) %>%
+        ungroup()
+    )
+  } %>%
+  select(year, 
+         bach_plus_per_white, bach_plus_per_black,
+         first_quarter_w, first_quarter_b, 
+         mean_w, mean_b, 
+         third_quarter_w, third_quarter_b) %>%
+  melt(id = 'year') 
+
+educ_data_race$variable <- factor(educ_data_race$variable, labels = c("White", "Black", "White 25%", "Black 25%", "White mean", "Black mean", "75% White", "75% Black"))
+  
+  #initial line plot
+  p <- ggplot(data=educ_data_race, aes(x = year, y = value, colour = variable, linetype = variable))+
+    geom_point(size = 1)+
+    geom_line(size = .6)
+  p <- p + theme_bw()
+  midpoint <- (max(educ_data_race$value, na.rm = TRUE)+min(educ_data_race$value, na.rm = TRUE))/2
+  border_space <- .1 * midpoint
+  p <- p + ylim(c(min(educ_data_race$value, na.rm = TRUE) - border_space, max(educ_data_race$value, na.rm=TRUE) + border_space))
+
+  #add color and line types
+  cPalette <- c("#00a9b7", "#00a9b7", "grey50", "grey50", "black", "black", "grey50", "grey50")
+  p <- p + scale_colour_manual(
+    values = cPalette
+  ) +
+    scale_linetype_manual(
+      values = c("solid", "solid", "dashed", "dashed", "dashed", "dashed", "dashed", "dashed")
+    )
+  
+  #add remaining style and elements
+  p<-p+theme(text = element_text(family = "Museo Sans 300"),
+             legend.title=element_blank(),
+             legend.position = "none",
+             axis.text=element_text(size=12, family = "Museo Sans 300"),
+             axis.ticks.y=element_blank(),
+             plot.title=element_text(size=18, hjust=.5, family = "Museo Sans 300",
+                                     margin=margin(b=10,unit="pt")),
+             legend.text=element_text(size=12, family = "Museo Sans 300"),
+             plot.caption = element_text(family = "Museo Sans 300"),
+             plot.subtitle = element_text(family = "Museo Sans 300", hjust = 0.5))
+  p<-p+labs(title = "Bachelor Degrees, Ages 25-64 by Race",
+            y = "Percent",
+            x="Year")
+  
+graph <- ggplotly(p)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Percent: ', round(graph$x$data[[i]]$y, 1), "%")
+}
+
+graph
+```
+
+The educational attainment gap between white and black residents is relatively low in Louisville. This is likely related to our relatively low rate of college attainment overall. The gap is slowly expanding. This is also true for young adult degree holders.
+
+```{r, message = FALSE, warning = FALSE}
+race_gap <- educ_data %>%
+  filter(year > 2000) %>%
+  filter(current == 1) %>%
+  mutate(gap = bach_plus_per_white - bach_plus_per_black)
+
+rank_and_nb_group(race_gap[race_gap$year == 2016,],
+                  'gap',
+                  order = "Ascending",
+                  y_title = "Percentage Points",
+                  plot_title = 'Racial Degree Gap')
+```
+
+```{r, message = FALSE, warning = FALSE, fig.width = 9}
+gggraph <- graph_trendline(race_gap, 
+                'gap',
+                plot_title = 'Degree Gap Between White and Black Residents',
+                xmax = 2016) +
+  theme(legend.position = "none")
+
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Percent: ', round(graph$x$data[[i]]$y, 1), "%")
+}
+
+graph
+
+```
+
+##Geography
+[Here is a link where you can see the distribution of degrees across the county.](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Maps/edu_maps/edu_25_64_bach_map.html)
+
+##Young Adults
+As you can see, young adults have shown much more progress over the last decade.
+![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Edu_Images/edu_25_34_bach_plus_trendline.png)
+
+The 2015 blip is much more noticable among young adults. We are but a few short months away from the new Census data so we can see what's actually going on. 
+You're all invited to my Census data release party.
+
+```{r, message = FALSE, warning = FALSE, fig.width = 9}
+educ_data_change <-
+  educ_data %>%
+  filter(current == 1) %>%
+  group_by(city) %>%
+  mutate(change = per_25_34_bach_plus - first(per_25_34_bach_plus)) %>%
+  ungroup() %>%
+  mutate(lou = if_else(city == 'Louisville', 0, 3),
+         max_change = max(change[year == 2016]),
+         min_change = min(change[year == 2016])) %>%
+  group_by(city) %>%
+  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
+         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
+  ungroup() %>%
+  transmute(year,
+            city,
+            per_25_34_bach_plus,
+            change,
+            type = lou,
+            type = replace(type, max_city == 1, 1),
+            type = replace(type, min_city == 1, 2),
+            type = factor(type, labels = c("Louisville",
+                                           city[max_city==1&year==2016],
+                                           city[min_city==1&year==2016],
+                                           "Peer Average"))) %>%
+  group_by(type, year) %>%
+  summarise_all(mean, na.rm = TRUE)
+
+cPalette <- c("#00a9b7", "#47d110", "#d60000", "grey50")
+
+gggraph <- ggplot(educ_data_change, 
+       aes(x = year, y = change, color = type, alpha = type)) + 
+  geom_line() +
+  scale_colour_manual(
+    values = cPalette,
+    labels = c("city", "Louisville", "Max", "Min")) +
+  scale_alpha_manual(
+      values = c(1, 1, 1, .3),
+      labels =  c("city", "Louisville", "Max", "Min")) + 
+  theme(legend.title=element_blank()) + 
+  labs(title = 'Best and Worst Performing Cities, young adult degrees',
+       x = 'year',
+       y = 'percentage points')
+  
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "%")
+}
+
+graph
+```
+
+
+
+# **Median Earnings**
+
+This story is not that different from education.
+**We're staying in line with our peers, bu that means white residents are doing better and better, and progress for black residents has stagnated.**
+
+```{r, include = FALSE}
+earn_dat <- read_csv('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/output data/jobs_data_fips.csv') %>% filter(current == 1)
+```
+
+##Ranking
+
+Louisville performs well against its peers in median earnings, though the spread is thin and we are just above the middle chunk. 
+```{r, warning = FALSE}
+rank_and_nb_group(earn_dat[earn_dat$year == 2016,],
+                  'median_earnings3',
+                  plot_title = 'Median Earnings',
+                  subtitle_text = 'Adjusted for Inflation and Cost of Living')
+```
+
+##Trendline
+Louisville has made progress over the last few years, but earnings generally declined from 2005 to 2012, so we are below where we used to be.
+```{r, warning = FALSE, fig.width = 9}
+graph_trendline(earn_dat,
+                'median_earnings3',
+                plot_title = 'Median Earnings',
+                subtitle_text = 'Adjusted for Inflation and Cost of Living',
+                xmin = 2000,
+                xmax = 2016)
+```
+
+##Change relative to peers
+
+Louisville has fluctuated around our peer city mean over the course of the past decade. We suffered mre during the Recession but have rebounded better than our peers.
+```{r, warning = FALSE, message = FALSE, fig.width = 9}
+earn_dat_change <-
+  earn_dat %>%
+  filter(year > 2000 & !is.na(median_earnings3)) %>%
+  group_by(city) %>%
+  mutate(change = median_earnings3 - first(median_earnings3)) %>%
+  ungroup() %>%
+  mutate(lou = if_else(city == 'Louisville', 0, 3),
+         max_change = max(change[year == 2016]),
+         min_change = min(change[year == 2016])) %>%
+  group_by(city) %>%
+  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
+         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
+  ungroup() %>%
+  transmute(year,
+            city,
+            median_earnings3,
+            change,
+            type = lou,
+            type = replace(type, max_city == 1, 1),
+            type = replace(type, min_city == 1, 2),
+            type = factor(type, labels = c("Louisville",
+                                           city[max_city==1&year==2016],
+                                           city[min_city==1&year==2016],
+                                           "Peer Average"))) %>%
+  group_by(type, year) %>%
+  summarise_all(mean, na.rm = TRUE)
+
+cPalette <- c("#00a9b7", "#47d110", "#d60000", "grey50")
+
+gggraph <- ggplot(earn_dat_change, 
+       aes(x = year, y = median_earnings3, color = type, alpha = type)) + 
+  geom_line() +
+  scale_colour_manual(
+    values = cPalette,
+    labels = c("city", "Louisville", "Max", "Min")) +
+  scale_alpha_manual(
+      values = c(1, 1, 1, .3),
+      labels =  c("city", "Louisville", "Max", "Min")) + 
+  theme(legend.title=element_blank()) + 
+  labs(title = 'Best and Worst Performing Cities',
+       x = 'year',
+       y = 'dollars')
+  
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Change: $', round(graph$x$data[[i]]$y, 0))
+}
+
+graph
+```
+
+Median earnings are now around $1,600 lower than they were in 2005.
+```{r, warning = FALSE, message = FALSE, fig.width = 9}
+gggraph <- ggplot(earn_dat_change, 
+       aes(x = year, y = change, color = type, alpha = type)) + 
+  geom_line() +
+  scale_colour_manual(
+    values = cPalette,
+    labels = c("city", "Louisville", "Max", "Min")) +
+  scale_alpha_manual(
+      values = c(1, 1, 1, .3),
+      labels =  c("city", "Louisville", "Max", "Min")) + 
+  theme(legend.title=element_blank()) + 
+  labs(title = 'Percent Change (all cities start at 0)',
+       x = 'year',
+       y = 'dollars')
+  
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Change: $', round(graph$x$data[[i]]$y, 0))
+}
+
+graph
+
+```
+
+Starting the graph in 2000 instead of 2005 reflects the general progress we made against our peers from 2000 - 2005. Only Oklahoma City, Omaha, and Tulsa ended up net positive over that timeframe. We made progress on all of our other peers except for Cincinatti in that timeframe.
+```{r, warning = FALSE, fig.width = 9, message = FALSE}
+earn_dat_change <-
+  earn_dat %>%
+  filter(year > 1999 & !is.na(median_earnings3)) %>%
+  group_by(city) %>%
+  mutate(change = median_earnings3 - first(median_earnings3)) %>%
+  ungroup() %>%
+  mutate(lou = if_else(city == 'Louisville', 0, 3),
+         max_change = max(change[year == 2016]),
+         min_change = min(change[year == 2016])) %>%
+  group_by(city) %>%
+  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
+         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
+  ungroup() %>%
+  transmute(year,
+            city,
+            median_earnings3,
+            change,
+            type = lou,
+            type = replace(type, max_city == 1, 1),
+            type = replace(type, min_city == 1, 2),
+            type = factor(type, labels = c("Louisville",
+                                           city[max_city==1&year==2016],
+                                           city[min_city==1&year==2016],
+                                           "Peer Average"))) %>%
+  group_by(type, year) %>%
+  summarise_all(mean, na.rm = TRUE)
+
+cPalette <- c("#00a9b7", "#47d110", "#d60000", "grey50")
+
+gggraph <- ggplot(earn_dat_change, 
+       aes(x = year, y = change, color = type, alpha = type)) + 
+  geom_line() +
+  scale_colour_manual(
+    values = cPalette,
+    labels = c("city", "Louisville", "Max", "Min")) +
+  scale_alpha_manual(
+      values = c(1, 1, 1, .3),
+      labels =  c("city", "Louisville", "Max", "Min")) + 
+  theme(legend.title=element_blank()) + 
+  labs(title = 'Percent Change (all cities start at 0)',
+       x = 'year',
+       y = 'dollars')
+  
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Change: $', round(graph$x$data[[i]]$y, 0))
+}
+
+graph
+```
+
+##By Race
+
+Here, the top cluster of lines represents white residents and the bottom cluster represents black residents. We generally perform poorly in both. While median earnings for white residents have trended upwardsin the wake of the recession, earnings for black residents have remained flat. White residents are back to making as much as they were in 2005 / 2006, while black residents have largely been excluded from economic progress.
+```{r, fig.width = 9, message = FALSE}
+earn_dat_race <- earn_dat %>%
+  filter(year > 2000 & !is.na(median_earnings_white)) %>%
+  {
+    x <- .
+    bind_cols(
+      x %>% filter(city == 'Louisville'),
+      x %>% filter(city != 'Louisville') %>%
+            group_by(year) %>%
+            summarise(first_quarter_w = quantile(median_earnings_white, prob = 0.25, na.rm = TRUE),
+                      mean_w = mean(median_earnings_white, na.rm = TRUE),
+                      third_quarter_w = quantile(median_earnings_white, prob = 0.75, na.rm = TRUE),
+                      first_quarter_b = quantile(median_earnings_black, prob = 0.25, na.rm = TRUE),
+                      mean_b = mean(median_earnings_black, na.rm = TRUE),
+                      third_quarter_b = quantile(median_earnings_black, prob = 0.75, na.rm = TRUE)) %>%
+        ungroup()
+    )
+  } %>%
+  select(year, 
+         median_earnings_white, median_earnings_black,
+         first_quarter_w, first_quarter_b, 
+         mean_w, mean_b, 
+         third_quarter_w, third_quarter_b) %>%
+  melt(id = 'year') 
+
+earn_dat_race$variable <- factor(earn_dat_race$variable, labels = c("White", "Black", "White 25%", "Black 25%", "White mean", "Black mean", "75% White", "75% Black"))
+  
+  #initial line plot
+  p <- ggplot(data=earn_dat_race, aes(x = year, y = value, colour = variable, linetype = variable))+
+    geom_point(size = 1)+
+    geom_line(size = .6)
+  p <- p + theme_bw()
+  midpoint <- (max(earn_dat_race$value, na.rm = TRUE)+min(earn_dat_race$value, na.rm = TRUE))/2
+  border_space <- .1 * midpoint
+  p <- p + ylim(c(min(earn_dat_race$value, na.rm = TRUE) - border_space, max(earn_dat_race$value, na.rm=TRUE) + border_space))
+
+  #add color and line types
+  cPalette <- c("#00a9b7", "#00a9b7", "grey50", "grey50", "black", "black", "grey50", "grey50")
+  p <- p + scale_colour_manual(
+    values = cPalette
+  ) +
+    scale_linetype_manual(
+      values = c("solid", "solid", "dashed", "dashed", "dashed", "dashed", "dashed", "dashed")
+    )
+  
+  #add remaining style and elements
+  p<-p+theme(text = element_text(family = "Museo Sans 300"),
+             legend.title=element_blank(),
+             legend.position = "none",
+             axis.text=element_text(size=12, family = "Museo Sans 300"),
+             axis.ticks.y=element_blank(),
+             plot.title=element_text(size=18, hjust=.5, family = "Museo Sans 300",
+                                     margin=margin(b=10,unit="pt")),
+             legend.text=element_text(size=12, family = "Museo Sans 300"),
+             plot.caption = element_text(family = "Museo Sans 300"),
+             plot.subtitle = element_text(family = "Museo Sans 300", hjust = 0.5))
+  p<-p+labs(title = "Median Earnings by Race",
+            y = "Dollars",
+            x = "Year")
+  
+graph <- ggplotly(p)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Dollars: $', round(graph$x$data[[i]]$y, 0))
+}
+
+graph
+```
+
+The earnings gap in Louisville is relatively large compared to our peers. Looking at the earnings gap as a percentag vs. raw dollar amount makes no difference. Black workers make around $59 cents for every dollar white workers earn. This does not take into consideration the higher unemployment rate among black residents.
+```{r, message = FALSE, warning = FALSE}
+race_gap <- earn_dat %>%
+  filter(year > 2000) %>%
+  mutate(gap = median_earnings_white - median_earnings_black,
+         adjusted_gap = gap / median_earnings3 * 100)
+
+rank_and_nb_group(race_gap[race_gap$year == 2016,],
+                  'gap',
+                  order = "Ascending",
+                  y_title = "Dollars",
+                  plot_title = 'Earnings Gap, 2016 ($)')
+
+rank_and_nb_group(race_gap[race_gap$year == 2016,],
+                  'adjusted_gap',
+                  order = "Ascending",
+                  y_title = "Percent",
+                  plot_title = 'Earnings Gap, 2016 (%)')
+```
+
+The earnings gap is persistent and increasing
+```{r, message = FALSE, warning = FALSE, fig.width = 9}
+gggraph <- graph_trendline(race_gap, 
+                'gap',
+                plot_title = 'Earnings Gap Between White and Black Residents ($)',
+                xmax = 2016,
+                y_title = "Dollars") +
+  theme(legend.position = "none")
+
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Dollars: $', round(graph$x$data[[i]]$y, 0))
+}
+
+graph
+
+gggraph <- graph_trendline(race_gap, 
+                'adjusted_gap',
+                plot_title = 'Earnings Gap Between White and Black Residents (%)',
+                xmax = 2016,
+                y_title = "Percent") +
+  theme(legend.position = "none")
+
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Percent: ', round(graph$x$data[[i]]$y, 1), "%")
+}
+
+graph
+```
+
+##Geography
+[Here is a link where you can see median earnings across the county.](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Maps/jobs_maps/jobs_median_earnings_map.html)
+
+
+# **Quality of Place**
+```{r, include = FALSE}
+qop_data <- read_csv('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/output data/qp_data_fips.csv')
+```
+
+**Louisville and our peer cities are becoming les racially segregated.**
+
+##Ranking
+The percentage of residents living in the core county is not a particularly useful ranking since it just depends on how big the county is, but...here it is.
+![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/QP_Images/qp_pct_pop_core_county.png)
+
+##Trendline
+Our percentage and that of our peers is generally pretty constant over time.
+Brookings pointed out that many people seemed to be moving from the core city to the regional city. This does not seem to be an issue for us. The percentage of residents living in the core city (inside the Watterson) remained around 32.5% from 2007 to 2013.
+![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/QP_Images/pct_pop_living_in_core_county_trendline.png)
+
+## Racial Dissimilarity
+The racial dissimilarity index is the percentage of residents who would have to move for residents of all races to be evenly distributed throughout the city.
+Louisville's segregation index decreased by about 2.5 percentage points over that time period. Our best-performing peers saw decreases of 3 to 3.5 percentage points. 
+![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/QP_Images/qp_racial_geography_rankings.png)
+![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/QP_Images/qp_racial_geography_trendline.png)
+![](C:/Users/Harrison Kirby/Downloads/racial_dissimilarity.png)
+
+# **Health**
+```{r, include = FALSE}
+health_data <- read_csv('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/output data/health_data_redux.csv') %>% mutate(FIPS = as.numeric(FIPS))
+
+qop_data <- qop_data %>% filter(year == 2016) %>% select(FIPS, city)
+
+health_data <- left_join(health_data, qop_data, by = 'FIPS')
+```
+
+This is a weak spot for us in terms of data, so I will investigate what is avilable and can be broken down by race.
+
+##Poor or Fair Health
+The poor or fair health measures the percentage of people who descibe their health as such, instead of good, very good, or excellent.
+
+![Poor or Fair](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Health_Images/poor_or_fair_trendline.png)
+![Poor or Fair](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Health_Images/poor_or_fair_ranking.png)
+
+Louisville's performance on this measure has declined by a few percentage points over the past decade.  
+```{r, warning = FALSE, message = FALSE, fig.width = 9}
+health_data_change <-
+  health_data %>%
+  filter(current == 1) %>%
+  filter(year > 2004) %>%
+  filter(!is.na(poor_or_fair)) %>%
+  group_by(city) %>%
+  mutate(change = poor_or_fair - first(poor_or_fair)) %>%
+  ungroup() %>%
+  mutate(lou = if_else(city == 'Louisville', 0, 3),
+         max_change = max(change[year == 2016]),
+         min_change = min(change[year == 2016])) %>%
+  group_by(city) %>%
+  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
+         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
+  ungroup() %>%
+  transmute(year,
+            city,
+            poor_or_fair = poor_or_fair * 100,
+            change = change * 100,
+            type = lou,
+            type = replace(type, max_city == 1, 1),
+            type = replace(type, min_city == 1, 2),
+            type = factor(type, labels = c("Louisville",
+                                           city[max_city==1&year==2016],
+                                           city[min_city==1&year==2016],
+                                           "Peer Average"))) %>%
+  group_by(type, year) %>%
+  summarise_all(mean, na.rm = TRUE)
+
+cPalette <- c("#00a9b7", "#d60000", "#47d110", "grey50")
+
+gggraph <- ggplot(health_data_change, 
+       aes(x = year, y = poor_or_fair, color = type, alpha = type)) + 
+  geom_line() +
+  scale_colour_manual(
+    values = cPalette,
+    labels = c("city", "Louisville", "Max", "Min")) +
+  scale_alpha_manual(
+      values = c(1, 1, 1, .3),
+      labels =  c("city", "Louisville", "Max", "Min")) + 
+  theme(legend.title=element_blank()) + 
+  labs(title = 'Best and Worst Performing Cities',
+       x = 'year',
+       y = 'percent')
+  
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "%")
+}
+
+graph
+```
+
+Standardizing the change to the same starting place shows that our poor or fair health measure increased by marginally more than our peer city average: The average peer city saw an increase of 2.5 percentage points, while ours increased by 3.1 percentage points.
+```{r, message = FALSE, fig.widh = 9}
+gggraph <- ggplot(health_data_change, 
+       aes(x = year, y = change, color = type, alpha = type)) + 
+  geom_line() +
+  scale_colour_manual(
+    values = cPalette,
+    labels = c("city", "Louisville", "Max", "Min")) +
+  scale_alpha_manual(
+      values = c(1, 1, 1, .3),
+      labels =  c("city", "Louisville", "Max", "Min")) + 
+  theme(legend.title=element_blank()) + 
+  labs(title = 'Best and Worst Performing Cities',
+       x = 'year',
+       y = 'percentage points')
+  
+graph <- ggplotly(gggraph)
+
+for(i in 1:length(graph$x$data)){
+  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
+                                   '<br>Year: ', graph$x$data[[i]][['x']], 
+                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "percentage points")
+}
+
+graph
+```
+
+
