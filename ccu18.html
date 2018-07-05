@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+
+<meta charset="utf-8" />
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="generator" content="pandoc" />
+
+
+
+
+<title></title>
+
+<script src="site_libs/jquery-1.11.3/jquery.min.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link href="site_libs/bootstrap-3.3.5/css/bootstrap.min.css" rel="stylesheet" />
+<script src="site_libs/bootstrap-3.3.5/js/bootstrap.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/html5shiv.min.js"></script>
+<script src="site_libs/bootstrap-3.3.5/shim/respond.min.js"></script>
+<script src="site_libs/jqueryui-1.11.4/jquery-ui.min.js"></script>
+<link href="site_libs/tocify-1.9.1/jquery.tocify.css" rel="stylesheet" />
+<script src="site_libs/tocify-1.9.1/jquery.tocify.js"></script>
+<script src="site_libs/navigation-1.1/tabsets.js"></script>
+<link href="site_libs/highlightjs-9.12.0/default.css" rel="stylesheet" />
+<script src="site_libs/highlightjs-9.12.0/highlight.js"></script>
+
+<style type="text/css">code{white-space: pre;}</style>
+<style type="text/css">
+  pre:not([class]) {
+    background-color: white;
+  }
+</style>
+<script type="text/javascript">
+if (window.hljs) {
+  hljs.configure({languages: []});
+  hljs.initHighlightingOnLoad();
+  if (document.readyState && document.readyState === "complete") {
+    window.setTimeout(function() { hljs.initHighlighting(); }, 0);
+  }
+}
+</script>
+
+
+
+<style type="text/css">
+h1 {
+  font-size: 34px;
+}
+h1.title {
+  font-size: 38px;
+}
+h2 {
+  font-size: 30px;
+}
+h3 {
+  font-size: 24px;
+}
+h4 {
+  font-size: 18px;
+}
+h5 {
+  font-size: 16px;
+}
+h6 {
+  font-size: 12px;
+}
+.table th:not([align]) {
+  text-align: left;
+}
+</style>
+
+
+</head>
+
+<body>
+
+<style type = "text/css">
+.main-container {
+  max-width: 940px;
+  margin-left: auto;
+  margin-right: auto;
+}
+code {
+  color: inherit;
+  background-color: rgba(0, 0, 0, 0.04);
+}
+img {
+  max-width:100%;
+  height: auto;
+}
+.tabbed-pane {
+  padding-top: 12px;
+}
+.html-widget {
+  margin-bottom: 20px;
+}
+button.code-folding-btn:focus {
+  outline: none;
+}
+</style>
+
+
+
+<div class="container-fluid main-container">
+
+<!-- tabsets -->
+<script>
+$(document).ready(function () {
+  window.buildTabsets("TOC");
+});
+</script>
+
+<!-- code folding -->
+
+
+
+
+<script>
+$(document).ready(function ()  {
+
+    // move toc-ignore selectors from section div to header
+    $('div.section.toc-ignore')
+        .removeClass('toc-ignore')
+        .children('h1,h2,h3,h4,h5').addClass('toc-ignore');
+
+    // establish options
+    var options = {
+      selectors: "h1,h2",
+      theme: "bootstrap3",
+      context: '.toc-content',
+      hashGenerator: function (text) {
+        return text.replace(/[.\\/?&!#<>]/g, '').replace(/\s/g, '_').toLowerCase();
+      },
+      ignoreSelector: ".toc-ignore",
+      scrollTo: 0
+    };
+    options.showAndHide = true;
+    options.smoothScroll = true;
+
+    // tocify
+    var toc = $("#TOC").tocify(options).data("toc-tocify");
+});
+</script>
+
+<style type="text/css">
+
+#TOC {
+  margin: 25px 0px 20px 0px;
+}
+@media (max-width: 768px) {
+#TOC {
+  position: relative;
+  width: 100%;
+}
+}
+
+
+.toc-content {
+  padding-left: 30px;
+  padding-right: 40px;
+}
+
+div.main-container {
+  max-width: 1200px;
+}
+
+div.tocify {
+  width: 20%;
+  max-width: 260px;
+  max-height: 85%;
+}
+
+@media (min-width: 768px) and (max-width: 991px) {
+  div.tocify {
+    width: 25%;
+  }
+}
+
+@media (max-width: 767px) {
+  div.tocify {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+.tocify ul, .tocify li {
+  line-height: 20px;
+}
+
+.tocify-subheader .tocify-item {
+  font-size: 0.90em;
+  padding-left: 25px;
+  text-indent: 0;
+}
+
+.tocify .list-group-item {
+  border-radius: 0px;
+}
+
+
+</style>
+
+<!-- setup 3col/9col grid for toc_float and main content  -->
+<div class="row-fluid">
+<div class="col-xs-12 col-sm-4 col-md-3">
+<div id="TOC" class="tocify">
+</div>
+</div>
+
+<div class="toc-content col-xs-12 col-sm-8 col-md-9">
+
+
+
+
+<div class="fluid-row" id="header">
+
+
+
+
+</div>
+
+
+<p><strong>Setup</strong></p>
+<p>Working Directory</p>
+<pre class="r"><code>knitr::opts_knit$set(root.dir = &quot;C:/Users/Harrison Kirby/Desktop/GLP/CCU18&quot;)</code></pre>
+<p>Libraries</p>
+<pre class="r"><code>library(lubridate)
+library(ggthemes)
+library(classInt)
+library(showtext)
+library(feather)
+library(survey)
+library(tidyverse)
+library(magrittr)
+library(reshape2)</code></pre>
+<p>Add functions</p>
+<pre class="r"><code>insurance_time &lt;- function(starting.year=2006){
+  wd &lt;- getwd()
+  directory &lt;- &quot;Health/sahie_2008/&quot;
+  file_names &lt;- list.files(directory)
+  n&lt;-length(file_names)
+  y&lt;-starting.year
+  for (i in 1:n){
+    file_path &lt;- paste(directory, file_names[i], sep = &quot;&quot;)
+    data&lt;-read_csv(file_path, skip=79)
+    
+    if(y &gt; 2007){ data &lt;- data %&gt;% select(-X26) }
+    
+    data$statefips &lt;- as.character(data$statefips)
+    data$countyfips &lt;- as.character(data$countyfips)
+    
+    data$statefips &lt;- if_else( nchar(data$statefips) &lt; 2, paste0(&quot;0&quot;,data$statefips), data$statefips)
+    data$countyfips &lt;- if_else( nchar(data$countyfips) &lt; 3, paste0(&quot;0&quot;,data$countyfips), data$countyfips)
+    data$countyfips &lt;- if_else( nchar(data$countyfips) &lt; 3, paste0(&quot;0&quot;,data$countyfips), data$countyfips)
+    
+    data$FIPS &lt;- as.numeric(paste0(data$statefips, data$countyfips))
+    all.peers &lt;-subset(data, data$FIPS == 1073 |data$FIPS == 37119
+                       |data$FIPS == 39061 |data$FIPS == 39049
+                       |data$FIPS == 26081 |data$FIPS == 37081
+                       |data$FIPS == 45045 |data$FIPS == 18097
+                       |data$FIPS == 29095 |data$FIPS == 47093
+                       |data$FIPS == 21111 |data$FIPS == 47157
+                       |data$FIPS == 47037 |data$FIPS == 40109
+                       |data$FIPS == 31055 |data$FIPS == 29189
+                       |data$FIPS == 29510
+                       |data$FIPS == 40143 |data$FIPS == 39113
+                       |data$FIPS == 12031 |data$FIPS == 37183
+                       |data$FIPS == 51760)
+    
+    all.peers$year&lt;-y
+    y&lt;-y+1
+    
+    if(i==1){
+     df&lt;-all.peers 
+    }
+    else{
+      names(all.peers)&lt;-names(df)
+      df&lt;-rbind(df, all.peers)
+    }
+  }
+  df
+}
+
+
+pull_peers_MSA&lt;-function(data){
+  all.peers &lt;- filter(data, data$MSA %in% c(&quot;24340&quot;, &quot;41180&quot;, &quot;36420&quot;, &quot;46140&quot;, &quot;24860&quot;, &quot;28940&quot;, &quot;13820&quot;, &quot;26900&quot;, &quot;31140&quot;, &quot;28140&quot;, &quot;36540&quot;, &quot;24660&quot;, &quot;16740&quot;, &quot;18140&quot;, &quot;17140&quot;, &quot;34980&quot;, &quot;32820&quot;, &quot;27260&quot;, &quot;39580&quot;, &quot;19380&quot;, &quot;40060&quot;))
+  
+  all.peers$baseline &lt;- 1
+  all.peers$current  &lt;- 1
+  
+  all.peers$baseline[all.peers$MSA == 24340 | all.peers$MSA == 41180
+                     |all.peers$MSA == 36420 | all.peers$MSA == 46140
+                     |all.peers$MSA == 24860 | all.peers$MSA == 28940] &lt;-0
+  
+  all.peers$current[all.peers$MSA == 27260 | all.peers$MSA == 39580
+                    |all.peers$MSA == 19380 | all.peers$MSA == 40060] &lt;-0
+  all.peers
+}
+
+pull_peers_FIPS &lt;- function(dat){
+  all.peers &lt;- subset(dat, dat$FIPS == 1073 | dat$FIPS == 37119
+                      |dat$FIPS == 39061 |dat$FIPS == 39049
+                      |dat$FIPS == 26081 |dat$FIPS == 37081
+                      |dat$FIPS == 45045 |dat$FIPS == 18097
+                      |dat$FIPS == 29095 |dat$FIPS == 47093
+                      |dat$FIPS == 21111 |dat$FIPS == 47157
+                      |dat$FIPS == 47037 |dat$FIPS == 40109
+                      |dat$FIPS == 31055 |dat$FIPS == 29189
+                      |dat$FIPS == 29510 |dat$FIPS == 40143
+                      |dat$FIPS == 12031 |dat$FIPS == 37183
+                      |dat$FIPS == 39113 |dat$FIPS == 51760
+                      |dat$FIPS == &quot;01073&quot; | dat$FIPS == &quot;MERGED&quot;)
+  all.peers$baseline &lt;- 1
+  all.peers$current &lt;- 1
+  all.peers$baseline[all.peers$FIPS==26081|all.peers$FIPS==29189
+                     |all.peers$FIPS==29510|all.peers$FIPS==40109
+                     |all.peers$FIPS==40143|all.peers$FIPS==45045
+                     |all.peers$FIPS==47093|all.peers$FIPS==&quot;MERGED&quot;]&lt;-0
+  all.peers$current[all.peers$FIPS== 12031|all.peers$FIPS==37183|
+                      all.peers$FIPS==39113|all.peers$FIPS==51760]&lt;-0
+  all.peers
+}</code></pre>
+<div id="education-bachelor-degree-attainment-ages-25-64" class="section level1">
+<h1>Education : Bachelor Degree Attainment ages 25-64</h1>
+<div id="ranking" class="section level2">
+<h2>Ranking</h2>
+</div>
+<div id="trendline-by-race-wbh" class="section level2">
+<h2>Trendline by Race: W/B/H</h2>
+</div>
+<div id="map-of-ba-degrees-in-lou" class="section level2">
+<h2>Map of BA degrees in Lou</h2>
+</div>
+<div id="change-poverty-vs.nonpoverty" class="section level2">
+<h2>Change – poverty vs. nonpoverty</h2>
+</div>
+<div id="other" class="section level2">
+<h2>Other:</h2>
+<div id="associates-ranking" class="section level3">
+<h3>Associate’s Ranking</h3>
+</div>
+<div id="associates-by-race-trendline" class="section level3">
+<h3>Associate’s by race trendline</h3>
+</div>
+<div id="young-adult-degrees-assoc-or-bach" class="section level3">
+<h3>Young adult degrees (assoc or bach)</h3>
+</div>
+<div id="education-pipeline" class="section level3">
+<h3>Education pipeline</h3>
+</div>
+</div>
+</div>
+<div id="jobs-median-earnings" class="section level1">
+<h1>Jobs: median earnings</h1>
+<div id="ranking-1" class="section level2">
+<h2>Ranking</h2>
+</div>
+<div id="trendline-by-race" class="section level2">
+<h2>Trendline by race</h2>
+</div>
+<div id="map" class="section level2">
+<h2>Map</h2>
+</div>
+<div id="change-high-wage-jobs" class="section level2">
+<h2>change: high wage jobs</h2>
+</div>
+<div id="other-1" class="section level2">
+<h2>Other:</h2>
+<div id="earnings-gap" class="section level3">
+<h3>Earnings gap</h3>
+</div>
+<div id="distribution-of-job-across-the-citypayroll-jobs-by-zip" class="section level3">
+<h3>Distribution of job across the city/payroll + jobs by zip</h3>
+</div>
+<div id="unemployment-trendline-by-race" class="section level3">
+<h3>Unemployment trendline by race</h3>
+</div>
+<div id="working-poverty" class="section level3">
+<h3>Working poverty</h3>
+</div>
+<div id="income-inequality" class="section level3">
+<h3>Income inequality</h3>
+</div>
+</div>
+</div>
+<div id="health-health-outcomes-index" class="section level1">
+<h1>Health: health outcomes index</h1>
+<div id="ranking-2" class="section level2">
+<h2>Ranking</h2>
+</div>
+<div id="trendline-by-race-1" class="section level2">
+<h2>Trendline by race</h2>
+</div>
+<div id="map-of-life-expectancy" class="section level2">
+<h2>Map of life expectancy</h2>
+</div>
+<div id="change-of-children-in-poverty" class="section level2">
+<h2>Change; % of children in poverty</h2>
+</div>
+<div id="other-2" class="section level2">
+<h2>Other:</h2>
+<div id="health-insurance-by-race" class="section level3">
+<h3>Health insurance by race</h3>
+</div>
+<div id="health-insurance-by-income-quartiles-demonstrate-impact-of-expanded-medicaid" class="section level3">
+<h3>Health insurance by income quartiles (demonstrate impact of expanded Medicaid)</h3>
+</div>
+</div>
+</div>
+<div id="qop" class="section level1">
+<h1>QOP</h1>
+<div id="ranking-homeownership" class="section level2">
+<h2>Ranking: homeownership</h2>
+</div>
+<div id="trendline-homeownership-by-race" class="section level2">
+<h2>Trendline: homeownership by race</h2>
+</div>
+<div id="map-homeownership-or-burdened-households" class="section level2">
+<h2>Map: homeownership or burdened households</h2>
+</div>
+<div id="change-home-values-by-areas" class="section level2">
+<h2>change: home values by areas</h2>
+</div>
+<div id="other-3" class="section level2">
+<h2>Other</h2>
+<div id="of-msa-in-core-county" class="section level3">
+<h3>% of MSA in core county</h3>
+</div>
+<div id="housing-stock-by-race" class="section level3">
+<h3>Housing stock $ by race</h3>
+</div>
+<div id="segregation-race-by-area" class="section level3">
+<h3>Segregation = % race by % area</h3>
+</div>
+<div id="brain-drain-migration-figures" class="section level3">
+<h3>Brain drain migration figures</h3>
+</div>
+<div id="disconnected-youth-figures" class="section level3">
+<h3>Disconnected youth figures</h3>
+</div>
+</div>
+</div>
+
+
+
+</div>
+</div>
+
+</div>
+
+<script>
+
+// add bootstrap table styles to pandoc tables
+function bootstrapStylePandocTables() {
+  $('tr.header').parent('thead').parent('table').addClass('table table-condensed');
+}
+$(document).ready(function () {
+  bootstrapStylePandocTables();
+});
+
+
+</script>
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

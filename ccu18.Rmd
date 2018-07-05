@@ -1,0 +1,193 @@
+
+**Setup**
+
+Working Directory
+```{r setup}
+knitr::opts_knit$set(root.dir = "C:/Users/Harrison Kirby/Desktop/GLP/CCU18")
+```
+
+Libraries
+```{r libraries, message = FALSE}
+library(lubridate)
+library(ggthemes)
+library(classInt)
+library(showtext)
+library(feather)
+library(survey)
+library(tidyverse)
+library(magrittr)
+library(reshape2)
+```
+
+Add functions
+```{r}
+insurance_time <- function(starting.year=2006){
+  wd <- getwd()
+  directory <- "Health/sahie_2008/"
+  file_names <- list.files(directory)
+  n<-length(file_names)
+  y<-starting.year
+  for (i in 1:n){
+    file_path <- paste(directory, file_names[i], sep = "")
+    data<-read_csv(file_path, skip=79)
+    
+    if(y > 2007){ data <- data %>% select(-X26) }
+    
+    data$statefips <- as.character(data$statefips)
+    data$countyfips <- as.character(data$countyfips)
+    
+    data$statefips <- if_else( nchar(data$statefips) < 2, paste0("0",data$statefips), data$statefips)
+    data$countyfips <- if_else( nchar(data$countyfips) < 3, paste0("0",data$countyfips), data$countyfips)
+    data$countyfips <- if_else( nchar(data$countyfips) < 3, paste0("0",data$countyfips), data$countyfips)
+    
+    data$FIPS <- as.numeric(paste0(data$statefips, data$countyfips))
+    all.peers <-subset(data, data$FIPS == 1073 |data$FIPS == 37119
+                       |data$FIPS == 39061 |data$FIPS == 39049
+                       |data$FIPS == 26081 |data$FIPS == 37081
+                       |data$FIPS == 45045 |data$FIPS == 18097
+                       |data$FIPS == 29095 |data$FIPS == 47093
+                       |data$FIPS == 21111 |data$FIPS == 47157
+                       |data$FIPS == 47037 |data$FIPS == 40109
+                       |data$FIPS == 31055 |data$FIPS == 29189
+                       |data$FIPS == 29510
+                       |data$FIPS == 40143 |data$FIPS == 39113
+                       |data$FIPS == 12031 |data$FIPS == 37183
+                       |data$FIPS == 51760)
+    
+    all.peers$year<-y
+    y<-y+1
+    
+    if(i==1){
+     df<-all.peers 
+    }
+    else{
+      names(all.peers)<-names(df)
+      df<-rbind(df, all.peers)
+    }
+  }
+  df
+}
+
+
+pull_peers_MSA<-function(data){
+  all.peers <- filter(data, data$MSA %in% c("24340", "41180", "36420", "46140", "24860", "28940", "13820", "26900", "31140", "28140", "36540", "24660", "16740", "18140", "17140", "34980", "32820", "27260", "39580", "19380", "40060"))
+  
+  all.peers$baseline <- 1
+  all.peers$current  <- 1
+  
+  all.peers$baseline[all.peers$MSA == 24340 | all.peers$MSA == 41180
+                     |all.peers$MSA == 36420 | all.peers$MSA == 46140
+                     |all.peers$MSA == 24860 | all.peers$MSA == 28940] <-0
+  
+  all.peers$current[all.peers$MSA == 27260 | all.peers$MSA == 39580
+                    |all.peers$MSA == 19380 | all.peers$MSA == 40060] <-0
+  all.peers
+}
+
+pull_peers_FIPS <- function(dat){
+  all.peers <- subset(dat, dat$FIPS == 1073 | dat$FIPS == 37119
+                      |dat$FIPS == 39061 |dat$FIPS == 39049
+                      |dat$FIPS == 26081 |dat$FIPS == 37081
+                      |dat$FIPS == 45045 |dat$FIPS == 18097
+                      |dat$FIPS == 29095 |dat$FIPS == 47093
+                      |dat$FIPS == 21111 |dat$FIPS == 47157
+                      |dat$FIPS == 47037 |dat$FIPS == 40109
+                      |dat$FIPS == 31055 |dat$FIPS == 29189
+                      |dat$FIPS == 29510 |dat$FIPS == 40143
+                      |dat$FIPS == 12031 |dat$FIPS == 37183
+                      |dat$FIPS == 39113 |dat$FIPS == 51760
+                      |dat$FIPS == "01073" | dat$FIPS == "MERGED")
+  all.peers$baseline <- 1
+  all.peers$current <- 1
+  all.peers$baseline[all.peers$FIPS==26081|all.peers$FIPS==29189
+                     |all.peers$FIPS==29510|all.peers$FIPS==40109
+                     |all.peers$FIPS==40143|all.peers$FIPS==45045
+                     |all.peers$FIPS==47093|all.peers$FIPS=="MERGED"]<-0
+  all.peers$current[all.peers$FIPS== 12031|all.peers$FIPS==37183|
+                      all.peers$FIPS==39113|all.peers$FIPS==51760]<-0
+  all.peers
+}
+```
+
+# Education : Bachelor Degree Attainment ages 25-64
+
+## Ranking
+
+
+## Trendline by Race: W/B/H
+
+## Map of BA degrees in Lou
+
+## Change --  poverty vs. nonpoverty
+
+##Other:
+
+### Associate's Ranking
+
+### Associate's by race trendline
+
+### Young adult degrees (assoc or bach)
+
+### Education pipeline
+
+# Jobs: median earnings
+
+## Ranking
+
+## Trendline by race
+
+## Map
+
+## change: high wage jobs
+
+##Other:
+
+### Earnings gap
+
+### Distribution of job across the city/payroll + jobs by zip
+
+### Unemployment trendline by race
+
+### Working poverty
+
+### Income inequality
+
+# Health: health outcomes index
+
+## Ranking
+
+## Trendline by race
+
+## Map of life expectancy
+
+## Change; % of children in poverty
+
+## Other:
+
+### Health insurance by race
+
+### Health insurance by income quartiles (demonstrate impact of expanded Medicaid)
+
+# QOP
+
+## Ranking: homeownership
+
+## Trendline: homeownership by race
+
+## Map: homeownership or burdened households
+
+## change: home values by areas
+
+## Other
+
+### % of MSA in core county
+
+### Housing stock $ by race
+
+### Segregation = % race by % area
+
+### Brain drain migration figures
+
+### Disconnected youth figures
+
+

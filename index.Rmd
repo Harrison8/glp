@@ -1,754 +1,1186 @@
 
-```{r, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+#Setup
 
-library(classInt)
-library(ggthemes)
-library(reshape2)
+Some notes:
+Where I thought the data was too jittery, I included a trendline that uses a rolling average and a trendline that shows each individual years of data.
+```{r "setup", include = FALSE}
+knitr::opts_knit$set(root.dir = "C:/Users/Harrison Kirby/Desktop/GLP/ccu18")
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, echo = FALSE)
+```
+
+```{r libraries}
+#Data
+library(survey)
 library(tidyverse)
+library(magrittr)
+
+#Graphing
+library(ggthemes)
+library(classInt)
+library(showtext)
+library(reshape2)
 library(plotly)
+library(wesanderson)
 
-source('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/graphing_functions.R')
+#Mapping
+library(rgdal)
+library(RColorBrewer)
+library(leaflet)
 
+#library(feather)
 select <- function(...){dplyr::select(...)}
 ```
 
-# Deep Driver Deep Dive
+```{r functions}
+acs_time <- function(folder, starting_year = 2005){
+  wd <- getwd()
+  directory <- paste0(wd, folder)
+  file_names <- list.files(directory)
+  n <- length(file_names)
+  y <- starting_year
+  for (i in 1:n){
+    file_path <- paste0(wd, folder, file_names[i])
+    data <- read_csv(file_path, skip=1, col_types = cols("Id2" = col_double()))
+    names(data)[names(data) == 'Id2'] <- 'FIPS'
+    all_peers <- data %>% filter(FIPS %in% c(1073, 12031, 18097, 21111, 26081, 
+                                             29095, 29189, 29510, 31055, 37081, 
+                                             37119, 37183, 39049, 39061, 39113, 
+                                             40109, 40143, 45045, 47037, 47093, 
+                                             47157, 51760))
+    
+    all_peers$year <- y
+    y <- y + 1
+    
+    if(i == 1){
+     df <- all_peers 
+    }
+    else{
+      names(all_peers) <- names(df)
+      df <- rbind(df, all_peers)
+    }
+  }
+  df
+}
 
-This document includes data centered around our deep driver metrics.
+pull_peers_MSA<-function(data){
+  all.peers <- filter(data, data$MSA %in% c("24340", "41180", "36420", "46140", "24860", "28940", "13820", "26900", "31140", "28140", "36540", "24660", "16740", "18140", "17140", "34980", "32820", "27260", "39580", "19380", "40060"))
+  
+  all.peers$baseline <- 1
+  all.peers$current  <- 1
+  
+  all.peers$baseline[all.peers$MSA == 24340 | all.peers$MSA == 41180
+                     |all.peers$MSA == 36420 | all.peers$MSA == 46140
+                     |all.peers$MSA == 24860 | all.peers$MSA == 28940] <-0
+  
+  all.peers$current[all.peers$MSA == 27260 | all.peers$MSA == 39580
+                    |all.peers$MSA == 19380 | all.peers$MSA == 40060] <-0
+  all.peers
+}
 
-We have been looking at a really large spread of metrics over the last month or so. This document is a more in-depth approach to the deep drivers. As is tradition, it is really heavy on Education and Jobs and relatively light on QOP and health.
+pull_peers_FIPS <- function(dat){
+  all.peers <- subset(dat, dat$FIPS == 1073 | dat$FIPS == 37119
+                      |dat$FIPS == 39061 |dat$FIPS == 39049
+                      |dat$FIPS == 26081 |dat$FIPS == 37081
+                      |dat$FIPS == 45045 |dat$FIPS == 18097
+                      |dat$FIPS == 29095 |dat$FIPS == 47093
+                      |dat$FIPS == 21111 |dat$FIPS == 47157
+                      |dat$FIPS == 47037 |dat$FIPS == 40109
+                      |dat$FIPS == 31055 |dat$FIPS == 29189
+                      |dat$FIPS == 29510 |dat$FIPS == 40143
+                      |dat$FIPS == 12031 |dat$FIPS == 37183
+                      |dat$FIPS == 39113 |dat$FIPS == 51760
+                      |dat$FIPS == "01073" | dat$FIPS == "MERGED")
+  all.peers$baseline <- 1
+  all.peers$current <- 1
+  all.peers$baseline[all.peers$FIPS==26081|all.peers$FIPS==29189
+                     |all.peers$FIPS==29510|all.peers$FIPS==40109
+                     |all.peers$FIPS==40143|all.peers$FIPS==45045
+                     |all.peers$FIPS==47093|all.peers$FIPS=="MERGED"]<-0
+  all.peers$current[all.peers$FIPS== 12031|all.peers$FIPS==37183|
+                      all.peers$FIPS==39113|all.peers$FIPS==51760]<-0
+  
+  city <- c('Grand Rapids', 'St. Louis', 'Oklahoma City', 'Tulsa', 'Greenville', 'Knoxville', 
+            'Birmingham', 'Indianapolis', 'Louisville', 'Kansas City', 'Omaha', 'Greensboro', 
+            'Charlotte', 'Columbus', 'Cincinnati', 'Nashville', 'Memphis', 'Jacksonville', 
+            'Raleigh', 'Dayton', 'Richmond')
+  
+  FIPS_codes <- c(26081, 'MERGED', 40109, 40143, 45045, 47093, 1073, 18097, 21111, 29095, 31055, 
+                  37081, 37119, 39049, 39061, 47037, 47157, 12031, 37183, 39113, 51760)
+  
+  names_df <- data.frame(city, FIPS_codes)
+  
+  all.peers <- left_join(all.peers, names_df, by = c('FIPS' = 'FIPS_codes'))
+  all.peers
+}
 
-# **Bachelor Degrees: Ages 25-64**
+weight_stl <- function(df_original, variables, weight_variable = ""){
+  
+  n <- 1
+  
+  if(weight_variable == ""){
+    population_data <- read_csv("data/population_data.csv")
+    population_data$FIPS <- as.character(population_data$FIPS)
+    df_original <- df_original %>% left_join(population_data, by = c("FIPS", "year"))
+    weight_variable <- 'population'
+  }
+  
+  for(v in 1:length(variables)){
+    df  <- df_original[,c('FIPS', 'year', variables[n], weight_variable)]
+  
+    df$var <- df[[variables[n]]]
+    df$weight_var <- df[[weight_variable]]
+    
+    df %<>%
+      mutate(FIPS = replace(FIPS, FIPS == '29189' | FIPS == '29510', 'MERGED')) %>%
+      group_by(FIPS, year) %>%
+      summarise(var = weighted.mean(var, weight_var)) %>%
+      ungroup()
+    
+    df[[variables[n]]] <- df$var
+    
+    df %<>% select(-var)
+    
+    if(n == 1){
+      output <- df
+    }else{
+      output <- full_join(output, df, by = c('FIPS', 'year'))
+    }
+    
+    n = n + 1
+    
+  }
+  output
+}
 
-Louisville has made slight progress against its peers in terms of Bachelor degree attainment among all working age adults. Changes among young adults and associate degree holders are more noticable than among all adults, and progress is more steady among white residents.
+bind_df <- function(...){
+  data_frames <- list(...)
+  output <- reduce(data_frames, full_join, by = c('FIPS', 'year'))
+  output
+}
 
-**Compared to our peer cities, our white residents are catching up and black residents are falling behind.**
+rpp_col_adj <- function(x){
+  x *  data$rpp_index * data$cpi_index
+}
+```
 
-```{r educ_data, include = FALSE}
-educ_data <- read_csv('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/output data/education_data_fips.csv')
+```{r graphing}
+source('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/graphing_functions.R')
+
+#Tract Map
+map_jc = readOGR('data/maps/tract', layer = "JC Tracts",
+                 GDAL1_integer64_policy = TRUE, stringsAsFactors = FALSE, verbose = FALSE)
+
+map_jc$TRACT <- as.numeric(map_jc$TRACT)
+
+nh_names <- read_csv('data/maps/tract_to_nh.csv')
+
+nh_names$Id2 <- substr(nh_names$Id2, 6, 13)
+nh_names$Id2 <- as.numeric(nh_names$Id2)
+
+map_jc@data <- full_join(map_jc@data, nh_names, by = c('TRACT' = 'Id2'))
+
+map_jc@data$l_line1 <- paste("Tract #:", map_jc@data$TRACT, "in the")
+map_jc@data$l_line2 <- paste(map_jc@data$Neighborhood, "neighborhood")
+
+rm(nh_names)
+
+#Zip Code map
+map_jc_zip = readOGR('data/maps/zip', layer = 'Jefferson_County_KY_ZIP_Codes',
+                     GDAL1_integer64_policy = TRUE, stringsAsFactors = FALSE, verbose = FALSE)
+
+map_jc_zip$ZIPCODE <- as.numeric(map_jc_zip$ZIPCODE)
+
+map_jc_zip@data$l_line1 <- paste0("Zip Code ", map_jc_zip@data$ZIPCODE)
+```
+
+```{r Website / output toggle}
+web = TRUE
+```
+
+# Education : Bachelor Degree Attainment ages 25-64 {.tabset}
+
+## Ranking
+```{r data1}
+degree_df <- acs_time("/data/education/B15001/")
+
+degree_df %<>%
+  mutate(
+    num_25_34 = 
+      `Estimate; Male: - 25 to 34 years:` +
+      `Estimate; Female: - 25 to 34 years:`,
+    num_25_64 = 
+      `Estimate; Male: - 25 to 34 years:` +
+      `Estimate; Male: - 35 to 44 years:` +
+      `Estimate; Male: - 45 to 64 years:` +
+      `Estimate; Female: - 25 to 34 years:` +
+      `Estimate; Female: - 35 to 44 years:` +
+      `Estimate; Female: - 45 to 64 years:`,
+    
+    num_25_34_grad = 
+      `Estimate; Male: - 25 to 34 years: - Graduate or professional degree` + 
+      `Estimate; Female: - 25 to 34 years: - Graduate or professional degree`,
+    
+    num_25_64_grad = 
+      `Estimate; Male: - 25 to 34 years: - Graduate or professional degree` +
+      `Estimate; Male: - 35 to 44 years: - Graduate or professional degree` +
+      `Estimate; Male: - 45 to 64 years: - Graduate or professional degree` +
+      `Estimate; Female: - 25 to 34 years: - Graduate or professional degree` +
+      `Estimate; Female: - 35 to 44 years: - Graduate or professional degree` +
+      `Estimate; Female: - 45 to 64 years: - Graduate or professional degree`,
+    
+    num_25_34_bach_plus = 
+      `Estimate; Male: - 25 to 34 years: - Bachelor's degree` + 
+      `Estimate; Female: - 25 to 34 years: - Bachelor's degree` +
+      num_25_34_grad,
+    
+    num_25_64_bach_plus = 
+      `Estimate; Male: - 25 to 34 years: - Bachelor's degree` +
+      `Estimate; Male: - 35 to 44 years: - Bachelor's degree` +
+      `Estimate; Male: - 45 to 64 years: - Bachelor's degree` +
+      `Estimate; Female: - 25 to 34 years: - Bachelor's degree` +
+      `Estimate; Female: - 35 to 44 years: - Bachelor's degree` +
+      `Estimate; Female: - 45 to 64 years: - Bachelor's degree` +
+      num_25_64_grad,
+    
+    num_25_34_assoc_plus = 
+      `Estimate; Male: - 25 to 34 years: - Associate's degree` +
+      `Estimate; Female: - 25 to 34 years: - Associate's degree` +
+      num_25_34_bach_plus,
+    
+    num_25_64_assoc_plus = 
+      `Estimate; Male: - 25 to 34 years: - Associate's degree` +
+      `Estimate; Male: - 35 to 44 years: - Associate's degree` +
+      `Estimate; Male: - 45 to 64 years: - Associate's degree` +
+      `Estimate; Female: - 25 to 34 years: - Associate's degree` +
+      `Estimate; Female: - 35 to 44 years: - Associate's degree` +
+      `Estimate; Female: - 45 to 64 years: - Associate's degree` +
+      num_25_64_bach_plus,
+    
+    per_25_34_assoc_plus = num_25_34_assoc_plus / num_25_34 * 100,
+    per_25_64_assoc_plus = num_25_64_assoc_plus / num_25_64 * 100,
+    
+    per_25_34_bach_plus = num_25_34_bach_plus / num_25_34 * 100,
+    per_25_64_bach_plus = num_25_64_bach_plus / num_25_64 * 100,
+    
+    per_25_34_grad = num_25_34_grad / num_25_34 * 100,
+    per_25_64_grad = num_25_64_grad / num_25_64 * 100) %>%
+    {
+      x <- .
+      full_join(
+        x %>% weight_stl(c('per_25_34_assoc_plus', 'per_25_34_bach_plus', 'per_25_34_grad'), 'num_25_34'),
+        x %>% weight_stl(c('per_25_64_assoc_plus', 'per_25_64_bach_plus', 'per_25_64_grad'), 'num_25_64'))
+    }
+
+data <- degree_df
+
+data %<>% pull_peers_FIPS() %>% select(FIPS, city, year, current, baseline, everything())
+
+rm(degree_df)
+```
+
+```{r graph1}
+rank_and_nb_group(data[data$year == 2016,], 
+                  'per_25_64_bach_plus', 
+                  plot_title = 'Bachelor Degrees, Ages 25-64, 2016')
+```
+
+## Trendline by ethnicity
+```{r data2}
+#White
+degree_white_05 <- acs_time("/data/education/B15002H/Y05/", starting_year = 2005)
+degree_white_08 <- acs_time("/data/education/B15002H/Y08/", starting_year = 2008)
+
+degree_white_05 <- degree_white_05 %>%
+  mutate(
+    total = `Estimate; Total:`,
+    
+    assoc_plus_per_white =
+        (`Estimate; Female: - Associate's degree` +
+        `Estimate; Male: - Associate's degree` +
+        `Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+        / total * 100,
+    
+    bach_plus_per_white = 
+        (`Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+        / total * 100) %>%
+  select(FIPS, year, assoc_plus_per_white, bach_plus_per_white, total)
+
+degree_white_08 <- degree_white_08 %>%
+  mutate(
+    total = `Estimate; Total:`,
+    
+    assoc_plus_per_white =
+        (`Estimate; Female: - Associate's degree` +
+        `Estimate; Male: - Associate's degree` +
+        `Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+        / total * 100,
+    
+    bach_plus_per_white = 
+        (`Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+         /total * 100) %>%
+  select(FIPS, year, assoc_plus_per_white, bach_plus_per_white, total)
+
+degree_white <- bind_rows(degree_white_05, degree_white_08) %>%
+  weight_stl(c('assoc_plus_per_white', 'bach_plus_per_white'), 'total')
+
+#Black
+degree_black_05 = acs_time("/data/education/B15002B/Y05/", starting_year = 2005)
+degree_black_08 = acs_time("/data/education/B15002B/Y08/", starting_year = 2008)
+
+degree_black_05 %<>%
+  mutate(
+    total = `Estimate; Total:`,
+    
+    assoc_plus_per_black =
+        (`Estimate; Female: - Associate's degree` +
+        `Estimate; Male: - Associate's degree` +
+        `Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+        / total * 100,
+    
+    bach_plus_per_black = 
+        (`Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+        /total * 100) %>%
+  select(FIPS, year, assoc_plus_per_black, bach_plus_per_black, total)
+
+degree_black_08 %<>%
+  mutate(
+    total = `Estimate; Total:`,
+    
+    assoc_plus_per_black =
+        (`Estimate; Female: - Associate's degree` +
+        `Estimate; Male: - Associate's degree` +
+        `Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+        / total * 100,
+    
+    bach_plus_per_black = 
+        (`Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+        /total * 100) %>% 
+  select(FIPS, year, assoc_plus_per_black, bach_plus_per_black, total)
+
+degree_black = bind_rows(degree_black_05, degree_black_08) %>%
+  weight_stl(c('assoc_plus_per_black', 'bach_plus_per_black'), 'total')
+
+#Hispanic
+degree_hispanic_05 = acs_time("/data/education/B15002I/Y05/", starting_year = 2005)
+degree_hispanic_08 = acs_time("/data/education/B15002I/Y08/", starting_year = 2008)
+
+degree_hispanic_05 = degree_hispanic_05 %>%
+  mutate(
+    total = `Estimate; Total:`,
+    
+    assoc_plus_per_hispanic =
+        (`Estimate; Female: - Associate's degree` +
+        `Estimate; Male: - Associate's degree` +
+        `Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+        / total * 100,
+    
+    bach_plus_per_hispanic = 
+      (`Estimate; Female: - Bachelor's degree` + 
+       `Estimate; Male: - Bachelor's degree` + 
+       `Estimate; Female: - Graduate degree` + 
+       `Estimate; Male: - Graduate degree`)
+      /total * 100) %>%
+  select(FIPS, year, assoc_plus_per_hispanic, bach_plus_per_hispanic, total)
+
+degree_hispanic_08 = degree_hispanic_08 %>%
+  mutate(
+    total = `Estimate; Total:`,
+    
+    assoc_plus_per_hispanic =
+        (`Estimate; Female: - Associate's degree` +
+        `Estimate; Male: - Associate's degree` +
+        `Estimate; Female: - Bachelor's degree` + 
+        `Estimate; Male: - Bachelor's degree` + 
+        `Estimate; Female: - Graduate degree` + 
+        `Estimate; Male: - Graduate degree`)
+        / total * 100,
+    
+    bach_plus_per_hispanic = 
+      (`Estimate; Female: - Bachelor's degree` + 
+       `Estimate; Male: - Bachelor's degree` + 
+       `Estimate; Female: - Graduate degree` + 
+       `Estimate; Male: - Graduate degree`)
+      /total * 100) %>%
+  select(FIPS, year, assoc_plus_per_hispanic, bach_plus_per_hispanic, total)
+
+degree_hispanic = bind_rows(degree_hispanic_05, degree_hispanic_08) %>%
+  weight_stl(c('assoc_plus_per_hispanic', 'bach_plus_per_hispanic'), 'total')
+
+data %<>% bind_df(degree_white, degree_black, degree_hispanic)
+
+rm(degree_white_05, degree_white_08, degree_white, degree_black_05, degree_black_08, degree_black, degree_hispanic_05, degree_hispanic_08, degree_hispanic)
+```
+
+```{r graph2}
+graph_df <- data%>%
+filter(FIPS == 21111)%>%
+  select(year, bach_plus_per_white, bach_plus_per_black, bach_plus_per_hispanic) %>%
+  mutate_at(vars(bach_plus_per_white, bach_plus_per_black, bach_plus_per_hispanic), rollmean3) %>%
+  gather(bach_plus_per_white:bach_plus_per_hispanic, 
+         key = "var", value = "value")%>%
+  arrange(var)
+
+graph_df$var <- factor(graph_df$var, levels = unique(graph_df$var))
+
+graph_trendline_race(
+  graph_df,
+  xmin = 2006,
+  xmax = 2015,
+  plot_title = "Bachelor Degrees by Ethnicity",
+  subtitle_text = '3-year rolling average',
+  labels = c("African American", "Hispanic", "White"),
+  y_title = "Percent",
+  color_pal = wes_palette("Moonrise2"))
+
+graph_df <- data %>%
+  filter(FIPS == 21111)%>%
+  select(year, bach_plus_per_white, bach_plus_per_black, bach_plus_per_hispanic)%>%
+  gather(bach_plus_per_white:bach_plus_per_hispanic, 
+         key = "var", value = "value")%>%
+  arrange(var)
+
+graph_df$var <- factor(graph_df$var, levels = unique(graph_df$var))
+
+graph_trendline_race(
+  graph_df,
+  xmin = 2005,
+  xmax = 2016,
+  plot_title = "Bachelor Degrees by Ethnicity",
+  subtitle_text = '1-year values',
+  labels = c("African American", "Hispanic", "White"),
+  y_title = "Percent",
+  color_pal = wes_palette("Moonrise2"))
+```
+
+It's a bit tough to break down the data by race and include peer city information on the same graph, since that ends up with 12 lines to fit on the page. The third graph I included here tries to do that. The solid line represents Louisville, the dashed line represents our peer average, and the shaded area represents the 25th and 75th percentiles of our peers. The Bachelor degree version is very messy since the lines for black and hispanic are overlapping so much.
+
+```{r graph2.1}
+graph_trendline_race_peer(data, 
+                          vars = c('bach_plus_per_white', 'bach_plus_per_black', 'bach_plus_per_hispanic'),
+                          plot_title = 'Bachelor Degrees by Ethnicity',
+                          rollmean = 5)
+```
+
+## Map
+```{r data3}
+degree_map <- read_csv('Data/Education/ACS_16_5YR_B15001_with_ann.csv', skip = 1)
+
+degree_map %<>%
+  mutate(
+    num_25_34 = 
+      `Estimate; Male: - 25 to 34 years:` +
+      `Estimate; Female: - 25 to 34 years:`,
+    num_25_64 = 
+      `Estimate; Male: - 25 to 34 years:` +
+      `Estimate; Male: - 35 to 44 years:` +
+      `Estimate; Male: - 45 to 64 years:` +
+      `Estimate; Female: - 25 to 34 years:` +
+      `Estimate; Female: - 35 to 44 years:` +
+      `Estimate; Female: - 45 to 64 years:`,
+    
+    num_25_34_grad = 
+      `Estimate; Male: - 25 to 34 years: - Graduate or professional degree` + 
+      `Estimate; Female: - 25 to 34 years: - Graduate or professional degree`,
+    
+    num_25_64_grad = 
+      `Estimate; Male: - 25 to 34 years: - Graduate or professional degree` +
+      `Estimate; Male: - 35 to 44 years: - Graduate or professional degree` +
+      `Estimate; Male: - 45 to 64 years: - Graduate or professional degree` +
+      `Estimate; Female: - 25 to 34 years: - Graduate or professional degree` +
+      `Estimate; Female: - 35 to 44 years: - Graduate or professional degree` +
+      `Estimate; Female: - 45 to 64 years: - Graduate or professional degree`,
+    
+    num_25_34_bach_plus = 
+      `Estimate; Male: - 25 to 34 years: - Bachelor's degree` + 
+      `Estimate; Female: - 25 to 34 years: - Bachelor's degree` +
+      num_25_34_grad,
+    
+    num_25_64_bach_plus = 
+      `Estimate; Male: - 25 to 34 years: - Bachelor's degree` +
+      `Estimate; Male: - 35 to 44 years: - Bachelor's degree` +
+      `Estimate; Male: - 45 to 64 years: - Bachelor's degree` +
+      `Estimate; Female: - 25 to 34 years: - Bachelor's degree` +
+      `Estimate; Female: - 35 to 44 years: - Bachelor's degree` +
+      `Estimate; Female: - 45 to 64 years: - Bachelor's degree` +
+      num_25_64_grad,
+    
+    num_25_34_assoc_plus = 
+      `Estimate; Male: - 25 to 34 years: - Associate's degree` +
+      `Estimate; Female: - 25 to 34 years: - Associate's degree` +
+      num_25_34_bach_plus,
+    
+    num_25_64_assoc_plus = 
+      `Estimate; Male: - 25 to 34 years: - Associate's degree` +
+      `Estimate; Male: - 35 to 44 years: - Associate's degree` +
+      `Estimate; Male: - 45 to 64 years: - Associate's degree` +
+      `Estimate; Female: - 25 to 34 years: - Associate's degree` +
+      `Estimate; Female: - 35 to 44 years: - Associate's degree` +
+      `Estimate; Female: - 45 to 64 years: - Associate's degree` +
+      num_25_64_bach_plus) %>%
+  transmute(
+    Id = Id,
+    
+    per_25_34_assoc_plus = num_25_34_assoc_plus / num_25_34 * 100,
+    per_25_64_assoc_plus = num_25_64_assoc_plus / num_25_64 * 100,
+    
+    per_25_34_bach_plus = num_25_34_bach_plus / num_25_34 * 100,
+    per_25_64_bach_plus = num_25_64_bach_plus / num_25_64 * 100,
+    
+    per_25_34_grad = num_25_34_grad / num_25_34 * 100,
+    per_25_64_grad = num_25_64_grad / num_25_64 * 100)
+
+map_data <- degree_map
+```
+
+```{r map3}
+map_jc@data<-full_join(map_jc@data, degree_map, by = c('GEO_ID' = 'Id'))
+
+make_map("per_25_64_bach_plus", 
+         name = "Bachelor Degrees or Higher",
+         legend_title = "Bachelor<br/>Degrees")
+
+rm(degree_map)
+```
+
+
+## Change 
+This will be a change graph for bachelor degree attainment by poverty status, though I'm still waiting on Nate to send me his code. I included some other graphs in the meantime.
+
+Note the axes for these are different. Sorry about that. 
+```{r data4}
+degree_poverty <- acs_time('/data/education/C17003/', starting_year = 2005)
+
+degree_poverty %<>%
+  mutate(
+    total_pov = `Estimate; Income in the past 12 months below poverty level:`,
+    total_nonpov = `Estimate; Income in the past 12 months at or above poverty level:`,
+    
+    bach_plus_per_pov = `Estimate; Income in the past 12 months below poverty level: - Bachelor's degree or higher` / total_pov * 100,
+      
+    bach_plus_per_nonpov = `Estimate; Income in the past 12 months at or above poverty level: - Bachelor's degree or higher` / total_nonpov * 100) %>%
+    {
+      x <- .
+      full_join(
+        x %>% weight_stl('bach_plus_per_pov', 'total_pov'),
+        x %>% weight_stl('bach_plus_per_nonpov', 'total_nonpov')
+      )
+    }  %>%
+  mutate(bach_plus_pov_gap = bach_plus_per_nonpov - bach_plus_per_pov)
+
+data %<>% bind_df(degree_poverty)
+
+rm(degree_poverty)
+```
+
+```{r graph4, fig.width = 10}
+graph_trendline(data,
+                'bach_plus_per_pov',
+                plot_title = 'Bachelor Degrees: in Poverty',
+                rollmean = 3)
+
+graph_trendline(data,
+                'bach_plus_per_nonpov',
+                plot_title = 'Bachelor Degrees: not in Poverty',
+                rollmean = 3)
+
+graph_trendline(data,
+                'bach_plus_pov_gap',
+                plot_title = 'Bachelor Degrees: Gap Between Poverty and Non-Poverty',
+                rollmean = 3)
+
+graph_trendline(data,
+                'bach_plus_per_pov',
+                plot_title = 'Bachelor Degrees: in Poverty')
+
+graph_trendline(data,
+                'bach_plus_per_nonpov',
+                plot_title = 'Bachelor Degrees: not in Poverty')
+
+```
+
+
+
+## Assoc Ranking
+```{r graph5}
+rank_and_nb_group(data[data$year == 2016,], 
+                  'per_25_64_assoc_plus', 
+                  plot_title = 'Associate Degrees, Ages 25-64, 2016')
+```
+
+## Assoc Trendline
+```{r graph6}
+graph_df <- data %>%
+  filter(FIPS == 21111)%>%
+  select(year, assoc_plus_per_white, assoc_plus_per_black, assoc_plus_per_hispanic)%>%
+  mutate_at(vars( assoc_plus_per_white, assoc_plus_per_black, assoc_plus_per_hispanic), rollmean3) %>%
+  gather(assoc_plus_per_white:assoc_plus_per_hispanic, 
+         key = "var", value = "value")%>%
+  arrange(var)
+
+graph_df$var <- factor(graph_df$var, levels = unique(graph_df$var))
+
+graph_trendline_race(
+  graph_df,
+  xmin = 2006,
+  xmax = 2015,
+  plot_title = "Associate Degrees by Ethnicity",
+  subtitle = '3-year rolling average',
+  labels = c("African American", "Hispanic", "White"),
+  y_title = "Percent",
+  color_pal = wes_palette("Moonrise2"))
+
+graph_df <- data %>%
+  filter(FIPS == 21111)%>%
+  select(year, assoc_plus_per_white, assoc_plus_per_black, assoc_plus_per_hispanic)%>%
+  gather(assoc_plus_per_white:assoc_plus_per_hispanic, 
+         key = "var", value = "value")%>%
+  arrange(var)
+
+graph_df$var <- factor(graph_df$var, levels = unique(graph_df$var))
+
+graph_trendline_race(
+  graph_df,
+  xmin = 2005,
+  xmax = 2016,
+  plot_title = "Associate Degrees by Ethnicity",
+  labels = c("African American", "Hispanic", "White"),
+  y_title = "Percent",
+  color_pal = wes_palette("Moonrise2"))
+```
+
+## Young adult degrees
+```{r graph7, fig.width = 10}
+graph_trendline(data,
+                'per_25_34_bach_plus',
+                plot_title = 'Bachelor Degrees, Ages 25-34, 2016',
+                rollmean = 3)
+
+graph_trendline(data,
+                'per_25_34_assoc_plus',
+                plot_title = 'Associate Degrees, Ages 25-34, 2016',
+                rollmean = 3)
+
+graph_trendline(data,
+                'per_25_34_bach_plus',
+                plot_title = 'Bachelor Degrees, Ages 25-34, 2016')
+
+graph_trendline(data,
+                'per_25_34_assoc_plus',
+                plot_title = 'Associate Degrees, Ages 25-34, 2016')
+
+```
+
+## Education pipeline
+
+Still waiting on private school data
+```{r data8}
+```
+
+```{r graph8}
+```
+
+# Jobs: median earnings {.tabset}
+```{r inflation and COL indices}
+rpp <- read_csv("data/jobs/rppmsa.csv", skip = 4, col_names = TRUE, na = c("", "(NA)"))
+
+rpp$`2005` <- rpp$`2008`
+rpp$`2006` <- rpp$`2008`
+rpp$`2007` <- rpp$`2008`
+rpp$`2016` <- rpp$`2015`
+
+rpp <- rpp %>%
+  filter(LineCode == 4) %>%
+  select(-GeoFips, -LineCode, -Description) %>%
+  gather(2:13, key = year, value = "rpp") %>%
+  mutate(year = as.numeric(year))
+
+rpp$MSA <- substr(rpp$GeoName, 0, unlist(gregexpr(pattern = " \\(", rpp$GeoName)) -1 )
+
+rpp$MSA[rpp$MSA == "Grand Rapids-Wyoming, MI"] = "Grand Rapids"
+rpp$MSA[rpp$MSA == "St. Louis, MO-IL"] = "St. Louis"
+rpp$MSA[rpp$MSA == "Oklahoma City, OK"] = "Oklahoma City"
+rpp$MSA[rpp$MSA == "Tulsa, OK"] = "Tulsa"
+rpp$MSA[rpp$MSA == "Greenville-Anderson-Mauldin, SC"] = "Greenville"
+rpp$MSA[rpp$MSA == "Knoxville, TN"] = "Knoxville"
+rpp$MSA[rpp$MSA == "Birmingham-Hoover, AL"] = "Birmingham"
+rpp$MSA[rpp$MSA == "Louisville/Jefferson County, KY-IN"] = "Louisville"
+rpp$MSA[rpp$MSA == "Indianapolis-Carmel-Anderson, IN"] = "Indianapolis"
+rpp$MSA[rpp$MSA == "Kansas City, MO-KS"] = "Kansas City"
+rpp$MSA[rpp$MSA == "Omaha-Council Bluffs, NE-IA"] = "Omaha"
+rpp$MSA[rpp$MSA == "Greensboro-High Point, NC"] = "Greensboro"
+rpp$MSA[rpp$MSA == "Charlotte-Concord-Gastonia, NC-SC"] = "Charlotte"
+rpp$MSA[rpp$MSA == "Columbus, OH"] = "Columbus"
+rpp$MSA[rpp$MSA == "Cincinnati, OH-KY-IN"] = "Cincinnati"
+rpp$MSA[rpp$MSA == "Nashville-Davidson--Murfreesboro--Franklin, TN"] = "Nashville"
+rpp$MSA[rpp$MSA == "Memphis, TN-MS-AR"] = "Memphis"
+rpp$MSA[rpp$MSA == "Jacksonville, FL"] = "Jacksonville"
+rpp$MSA[rpp$MSA == "Raleigh, NC"] = "Raleigh"
+rpp$MSA[rpp$MSA == "Dayton, OH"] = "Dayton"
+rpp$MSA[rpp$MSA == "Richmond, VA"] = "Richmond"
+
+rpp %<>% select(-GeoName)
+
+data %<>% left_join(rpp, by = c('year' = 'year', 'city' = 'MSA'))
+
+data %<>%
+  group_by(year) %>%
+  mutate(rpp_lou = rpp[city == "Louisville"],
+         rpp_index = rpp_lou / rpp) %>%
+  ungroup() %>%
+  select(-rpp, -rpp_lou)
+
+cpi <- read_csv("data/jobs/CPI-U-RS.csv")
+
+cpi %<>%
+  rename(year = YEAR,
+         cpi = AVG)
+
+data %<>% left_join(cpi, by = "year")
+
+data %<>%
+  group_by(city) %>%
+  mutate(base_cpi = cpi[year == 2016],
+         cpi_index = base_cpi/cpi) %>%
+  ungroup() %>%
+  select(-cpi, -base_cpi)
+
+rm(rpp, cpi)
 ```
 
 ## Ranking
+```{r data9}
+earn_data <- acs_time("/data/jobs/S2001/")
 
-Compared to its peers, Louisville is poorly educated. We rank below the middle of the pack. 2015 was an exceptionally favorable year for us, and our high ranking is likely due to survey error. Our ranking in 2016 seemed to also be slightly below what we would expect (especially pronounced among young adults). The 2017 data will shed some light on which is more accurate.
-```{r, warning=FALSE}
-rank_and_nb_group(
-  educ_data[educ_data$year == 2015,],
-  'per_25_64_bach_plus',
-  plot_title = "Bachelor Degrees, 2015")
+earn_data <- earn_data %>%
+  select(FIPS, 
+         year,
+         median_earnings = `Total; Estimate; Population 16 years and over with earnings - Median earnings (dollars)`) %>%
+  mutate(median_earnings = as.numeric(as.character(median_earnings)),
+         FIPS = as.character(FIPS)) %>%
+  weight_stl('median_earnings')
 
-rank_and_nb_group(
-  educ_data[educ_data$year == 2016,],
-  'per_25_64_bach_plus',
-  plot_title = "Bachelor Degrees, 2016")
+data %<>% bind_df(earn_data) %>%
+  mutate(median_earnings = median_earnings * rpp_index * cpi_index)
+
+rm(earn_data)
 ```
 
-##Trendline
-We have made incremental progress toward our peer city mean, though we still fall short.
-```{r, warning = FALSE, fig.width = 10}
-graph_trendline(
-  educ_data,
-  plot_title = 'Bachelor Degrees, Ages 25-64',
-  'per_25_64_bach_plus',
-  xmin = 2000,
-  xmax = 2016)
+```{r graph9}
+rank_and_nb_group(df = data[data$year == 2016,], 
+                  var = 'median_earnings', 
+                  plot_title = 'Median Earnings, 2016')
 ```
 
-##Change relative to peers
+## Trendline by race
+```{r data10}
+earn_data_white <- acs_time("/data/jobs/B20017H/")
 
-Knoxville and Tulsa have performed the best and worst among our current peer group since 2005.
-```{r, warning = FALSE, message = FALSE, fig.width = 9}
-educ_data_change <-
-  educ_data %>%
-  filter(current == 1) %>%
-  filter(year > 2000) %>%
-  group_by(city) %>%
-  mutate(change = per_25_64_bach_plus - first(per_25_64_bach_plus)) %>%
-  ungroup() %>%
-  mutate(lou = if_else(city == 'Louisville', 0, 3),
-         max_change = max(change[year == 2016]),
-         min_change = min(change[year == 2016])) %>%
-  group_by(city) %>%
-  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
-         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
-  ungroup() %>%
-  transmute(year,
-            city,
-            per_25_64_bach_plus,
-            change,
-            type = lou,
-            type = replace(type, max_city == 1, 1),
-            type = replace(type, min_city == 1, 2),
-            type = factor(type, labels = c("Louisville",
-                                           city[max_city==1&year==2016],
-                                           city[min_city==1&year==2016],
-                                           "Peer Average"))) %>%
-  group_by(type, year) %>%
-  summarise_all(mean, na.rm = TRUE)
+earn_data_white <- earn_data_white %>%
+  select(FIPS, 
+         year,
+         median_earnings_white = `Estimate; Total:`) %>%
+  mutate(FIPS = as.character(FIPS),
+         median_earnings_white = as.numeric(as.character(median_earnings_white))) %>%
+  weight_stl('median_earnings_white')
 
-cPalette <- c("#00a9b7", "#47d110", "#d60000", "grey50")
+earn_data_black <- acs_time("/data/jobs/B20017B/")
 
-gggraph <- ggplot(educ_data_change, 
-       aes(x = year, y = per_25_64_bach_plus, color = type, alpha = type)) + 
-  geom_line() +
-  scale_colour_manual(
-    values = cPalette,
-    labels = c("city", "Louisville", "Max", "Min")) +
-  scale_alpha_manual(
-      values = c(1, 1, 1, .3),
-      labels =  c("city", "Louisville", "Max", "Min")) + 
-  theme(legend.title=element_blank()) + 
-  labs(title = 'Best and Worst Performing Cities',
-       x = 'year',
-       y = 'percentage points')
-  
-graph <- ggplotly(gggraph)
+earn_data_black <- earn_data_black %>%
+  select(FIPS, 
+         year,
+         median_earnings_black = `Estimate; Total:`) %>%
+  mutate(FIPS = as.character(FIPS),
+         median_earnings_black = as.numeric(as.character(median_earnings_black))) %>%
+  weight_stl('median_earnings_black')
 
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "%")
-}
+earn_data_hisp <- acs_time("/data/jobs/B20017I/")
 
-graph
+earn_data_hisp <- earn_data_hisp %>%
+  select(FIPS, 
+         year,
+         median_earnings_hispanic = `Estimate; Total:`) %>%
+  mutate(FIPS = as.character(FIPS),
+         median_earnings_hispanic = as.numeric(as.character(median_earnings_hispanic))) %>%
+  weight_stl('median_earnings_hispanic')
+
+data %<>% bind_df(earn_data_white, earn_data_black, earn_data_hisp) %>%
+  mutate_at(vars(median_earnings_white, median_earnings_black, median_earnings_hispanic), rpp_col_adj)
+
+rm(earn_data_white, earn_data_black, earn_data_hisp)
 ```
 
-This graph is very similar to the one above, except all cities begin at 0. This hones in on the amount of change we've seen in Louisville and filters out the fact that we start at a different place than our peer cities. The y-axis shows the percentage-point change since 2005. Here, Louisville is in line with that of our peer cities, assuming the true percentage of bachelor degree holders lies somewhere between the 2015 ands 2016 estimates.
-```{r, warning = FALSE, message = FALSE, fig.width = 9}
-gggraph <- ggplot(educ_data_change, 
-       aes(x = year, y = change, color = type, alpha = type)) + 
-  geom_line() +
-  scale_colour_manual(
-    values = cPalette,
-    labels = c("city", "Louisville", "Max", "Min")) +
-  scale_alpha_manual(
-      values = c(1, 1, 1, .3),
-      labels =  c("city", "Louisville", "Max", "Min")) + 
-  theme(legend.title=element_blank()) + 
-  labs(title = 'Percent Change (all cities start at 0)',
-       x = 'year',
-       y = 'percentage points')
-  
-graph <- ggplotly(gggraph)
+```{r graph10}
+graph_df <- data %>%
+  filter(FIPS == 21111)%>%
+  select(year, median_earnings_white, median_earnings_black, median_earnings_hispanic)%>%
+  gather(median_earnings_white:median_earnings_hispanic, 
+         key = "var", value = "value")%>%
+  arrange(var)
 
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "%")
-}
+graph_df$var <- factor(graph_df$var, levels = unique(graph_df$var))
 
-graph
+graph_trendline_race(
+  graph_df,
+  xmin = 2005,
+  xmax = 2016,
+  plot_title = "Earnings by Ethnicity",
+  labels = c("African American", "Hispanic", "White"),
+  y_title = "Dollars",
+  color_pal = wes_palette("Moonrise2"))
+
+graph_trendline_race_peer(data, 
+                          vars = c('median_earnings_white', 'median_earnings_black', 'median_earnings_hispanic'),
+                          plot_title = 'Median Earnings by Ethnicity',
+                          rollmean = 3,
+                          y_title = 'Dollars')
+
+graph_trendline_race_peer(data, 
+                          vars = c('median_earnings_white', 'median_earnings_black', 'median_earnings_hispanic'),
+                          plot_title = 'Median Earnings by Ethnicity',
+                          rollmean = 1,
+                          y_title = 'Dollars')
 
 ```
 
+## Map
+```{r data11}
+earn_map <- read_csv("data/jobs/ACS_16_5YR_S2001_with_ann.csv", skip = 1,
+                      col_types = cols(
+                      `Total; Estimate; Median earnings (dollars)` = col_number())
+                   ) 
 
-##By Race
-
-Here, the top cluster of lines represents white residents and the bottom cluster represents black residents. We generally perform poorly in both.
-```{r, fig.width = 9, message = FALSE}
-educ_data_race <- educ_data %>%
-  filter(current == 1) %>%
-  filter(year > 2000) %>%
-  {
-    x <- .
-    bind_cols(
-      x %>% filter(city == 'Louisville'),
-      x %>% filter(city != 'Louisville') %>%
-            group_by(year) %>%
-            summarise(first_quarter_w = quantile(bach_plus_per_white, prob = 0.25, na.rm = TRUE),
-                      mean_w = mean(bach_plus_per_white, na.rm = TRUE),
-                      third_quarter_w = quantile(bach_plus_per_white, prob = 0.75, na.rm = TRUE),
-                      first_quarter_b = quantile(bach_plus_per_black, prob = 0.25, na.rm = TRUE),
-                      mean_b = mean(bach_plus_per_black, na.rm = TRUE),
-                      third_quarter_b = quantile(bach_plus_per_black, prob = 0.75, na.rm = TRUE)) %>%
-        ungroup()
-    )
-  } %>%
-  select(year, 
-         bach_plus_per_white, bach_plus_per_black,
-         first_quarter_w, first_quarter_b, 
-         mean_w, mean_b, 
-         third_quarter_w, third_quarter_b) %>%
-  melt(id = 'year') 
-
-educ_data_race$variable <- factor(educ_data_race$variable, labels = c("White", "Black", "White 25%", "Black 25%", "White mean", "Black mean", "75% White", "75% Black"))
-  
-  #initial line plot
-  p <- ggplot(data=educ_data_race, aes(x = year, y = value, colour = variable, linetype = variable))+
-    geom_point(size = 1)+
-    geom_line(size = .6)
-  p <- p + theme_bw()
-  midpoint <- (max(educ_data_race$value, na.rm = TRUE)+min(educ_data_race$value, na.rm = TRUE))/2
-  border_space <- .1 * midpoint
-  p <- p + ylim(c(min(educ_data_race$value, na.rm = TRUE) - border_space, max(educ_data_race$value, na.rm=TRUE) + border_space))
-
-  #add color and line types
-  cPalette <- c("#00a9b7", "#00a9b7", "grey50", "grey50", "black", "black", "grey50", "grey50")
-  p <- p + scale_colour_manual(
-    values = cPalette
-  ) +
-    scale_linetype_manual(
-      values = c("solid", "solid", "dashed", "dashed", "dashed", "dashed", "dashed", "dashed")
-    )
-  
-  #add remaining style and elements
-  p<-p+theme(text = element_text(family = "Museo Sans 300"),
-             legend.title=element_blank(),
-             legend.position = "none",
-             axis.text=element_text(size=12, family = "Museo Sans 300"),
-             axis.ticks.y=element_blank(),
-             plot.title=element_text(size=18, hjust=.5, family = "Museo Sans 300",
-                                     margin=margin(b=10,unit="pt")),
-             legend.text=element_text(size=12, family = "Museo Sans 300"),
-             plot.caption = element_text(family = "Museo Sans 300"),
-             plot.subtitle = element_text(family = "Museo Sans 300", hjust = 0.5))
-  p<-p+labs(title = "Bachelor Degrees, Ages 25-64 by Race",
-            y = "Percent",
-            x="Year")
-  
-graph <- ggplotly(p)
-
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Percent: ', round(graph$x$data[[i]]$y, 1), "%")
-}
-
-graph
+earn_map %<>% select(Id, median_earnings = `Total; Estimate; Median earnings (dollars)`)
 ```
 
-The educational attainment gap between white and black residents is relatively low in Louisville. This is likely related to our relatively low rate of college attainment overall. The gap is slowly expanding. This is also true for young adult degree holders.
+```{r graph11}
+map_jc@data <- full_join(map_jc@data, earn_map, by = c('GEO_ID' = 'Id'))
 
-```{r, message = FALSE, warning = FALSE}
-race_gap <- educ_data %>%
-  filter(year > 2000) %>%
-  filter(current == 1) %>%
-  mutate(gap = bach_plus_per_white - bach_plus_per_black)
+make_map("median_earnings", 
+         name = "Median Earnings",
+         legend_title = "Median<br/>Earnings",
+         units = "Dollars")
 
-rank_and_nb_group(race_gap[race_gap$year == 2016,],
-                  'gap',
-                  order = "Ascending",
-                  y_title = "Percentage Points",
-                  plot_title = 'Racial Degree Gap')
+rm(earn_map)
 ```
-
-```{r, message = FALSE, warning = FALSE, fig.width = 9}
-gggraph <- graph_trendline(race_gap, 
-                'gap',
-                plot_title = 'Degree Gap Between White and Black Residents',
-                xmax = 2016) +
-  theme(legend.position = "none")
-
-graph <- ggplotly(gggraph)
-
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Percent: ', round(graph$x$data[[i]]$y, 1), "%")
-}
-
-graph
-
+## change: high wage jobs
+```{r data12}
 ```
-
-##Geography
-[Here is a link where you can see the distribution of degrees across the county.](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Maps/edu_maps/edu_25_64_bach_map.html)
-
-##Young Adults
-As you can see, young adults have shown much more progress over the last decade.
-![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Edu_Images/edu_25_34_bach_plus_trendline.png)
-
-The 2015 blip is much more noticable among young adults. We are but a few short months away from the new Census data so we can see what's actually going on. 
-You're all invited to my Census data release party.
-
-```{r, message = FALSE, warning = FALSE, fig.width = 9}
-educ_data_change <-
-  educ_data %>%
-  filter(current == 1) %>%
-  group_by(city) %>%
-  mutate(change = per_25_34_bach_plus - first(per_25_34_bach_plus)) %>%
-  ungroup() %>%
-  mutate(lou = if_else(city == 'Louisville', 0, 3),
-         max_change = max(change[year == 2016]),
-         min_change = min(change[year == 2016])) %>%
-  group_by(city) %>%
-  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
-         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
-  ungroup() %>%
-  transmute(year,
-            city,
-            per_25_34_bach_plus,
-            change,
-            type = lou,
-            type = replace(type, max_city == 1, 1),
-            type = replace(type, min_city == 1, 2),
-            type = factor(type, labels = c("Louisville",
-                                           city[max_city==1&year==2016],
-                                           city[min_city==1&year==2016],
-                                           "Peer Average"))) %>%
-  group_by(type, year) %>%
-  summarise_all(mean, na.rm = TRUE)
-
-cPalette <- c("#00a9b7", "#47d110", "#d60000", "grey50")
-
-gggraph <- ggplot(educ_data_change, 
-       aes(x = year, y = change, color = type, alpha = type)) + 
-  geom_line() +
-  scale_colour_manual(
-    values = cPalette,
-    labels = c("city", "Louisville", "Max", "Min")) +
-  scale_alpha_manual(
-      values = c(1, 1, 1, .3),
-      labels =  c("city", "Louisville", "Max", "Min")) + 
-  theme(legend.title=element_blank()) + 
-  labs(title = 'Best and Worst Performing Cities, young adult degrees',
-       x = 'year',
-       y = 'percentage points')
-  
-graph <- ggplotly(gggraph)
-
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "%")
-}
-
-graph
+```{r graph12}
 ```
 
 
-
-# **Median Earnings**
-
-This story is not that different from education.
-**We're staying in line with our peers, bu that means white residents are doing better and better, and progress for black residents has stagnated.**
-
-```{r, include = FALSE}
-earn_dat <- read_csv('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/output data/jobs_data_fips.csv') %>% filter(current == 1)
+## Earnings gap
+```{r data13}
+data %<>%
+  mutate(earnings_gap_black = median_earnings_white - median_earnings_black,
+         earnings_gap_hispanic = median_earnings_white - median_earnings_hispanic)
 ```
 
-##Ranking
+```{r graph13, fig.width = 10}
+graph_trendline(data,
+                'earnings_gap_black',
+                plot_title = 'Earnings Gap Between Black and White Residents',
+                y_title = "Dollars",
+                rollmean = 5)
 
-Louisville performs well against its peers in median earnings, though the spread is thin and we are just above the middle chunk. 
-```{r, warning = FALSE}
-rank_and_nb_group(earn_dat[earn_dat$year == 2016,],
-                  'median_earnings3',
-                  plot_title = 'Median Earnings',
-                  subtitle_text = 'Adjusted for Inflation and Cost of Living')
+graph_trendline(data,
+                'earnings_gap_hispanic',
+                plot_title = 'Earnings Gap Between Hispanic and White Residents',
+                y_title = "Dollars",
+                rollmean = 5)
+
+graph_trendline(data,
+                'earnings_gap_black',
+                plot_title = 'Earnings Gap Between Black and White Residents',
+                y_title = "Dollars")
+
+graph_trendline(data,
+                'earnings_gap_hispanic',
+                plot_title = 'Earnings Gap Between Hispanic and White Residents',
+                y_title = "Dollars")
 ```
 
-##Trendline
-Louisville has made progress over the last few years, but earnings generally declined from 2005 to 2012, so we are below where we used to be.
-```{r, warning = FALSE, fig.width = 9}
-graph_trendline(earn_dat,
-                'median_earnings3',
-                plot_title = 'Median Earnings',
-                subtitle_text = 'Adjusted for Inflation and Cost of Living',
-                xmin = 2000,
-                xmax = 2016)
+
+## Jobs by zip code
+```{r data14}
+business_data <- read_csv('data/jobs/BP_2016_00CZ1_with_ann.csv', skip = 1)
+
+#Join to Louisville Zip codes
+zip_codes <- read_csv('data/jobs/zcta_county_rel_10.csv')
+
+zip_codes %<>% 
+  filter(GEOID == 21111) %>%
+  select(zip = ZCTA5,
+         pop = ZPOP)
+
+zip_codes$pop <- replace(zip_codes$pop, zip_codes$pop < 500, NA)
+zip_codes$pop[zip_codes$zip == 40202] <- NA
+
+business_data <- zip_codes %>% 
+  left_join(business_data, by = c('zip' = 'Id2'))
+
+business_data <- business_data[,c(1, 2, 8, 9, 11)]
+
+business_data %<>%
+  mutate(businesses = `Number of establishments`,
+         employees  = as.numeric(`Paid employees for pay period including March 12 (number)`),
+         payroll    = as.numeric(`Annual payroll ($1,000)`) * 1000) %>%
+  mutate(businesses_per_resident = businesses / pop,
+         jobs_per_resident = employees / pop,
+         payroll_per_resident = payroll / pop,
+         payroll_per_job = payroll / employees) %>%
+  select(zip,
+         businesses_per_resident, jobs_per_resident, payroll_per_resident, payroll_per_job)
+
+map_data_zip <- business_data
+
+rm(zip_codes, business_data)
+
+#a = 0-19
+#e = 250-499
+#g = 1,000 to 2,499
 ```
 
-##Change relative to peers
-
-Louisville has fluctuated around our peer city mean over the course of the past decade. We suffered mre during the Recession but have rebounded better than our peers.
-```{r, warning = FALSE, message = FALSE, fig.width = 9}
-earn_dat_change <-
-  earn_dat %>%
-  filter(year > 2000 & !is.na(median_earnings3)) %>%
-  group_by(city) %>%
-  mutate(change = median_earnings3 - first(median_earnings3)) %>%
-  ungroup() %>%
-  mutate(lou = if_else(city == 'Louisville', 0, 3),
-         max_change = max(change[year == 2016]),
-         min_change = min(change[year == 2016])) %>%
-  group_by(city) %>%
-  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
-         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
-  ungroup() %>%
-  transmute(year,
-            city,
-            median_earnings3,
-            change,
-            type = lou,
-            type = replace(type, max_city == 1, 1),
-            type = replace(type, min_city == 1, 2),
-            type = factor(type, labels = c("Louisville",
-                                           city[max_city==1&year==2016],
-                                           city[min_city==1&year==2016],
-                                           "Peer Average"))) %>%
-  group_by(type, year) %>%
-  summarise_all(mean, na.rm = TRUE)
-
-cPalette <- c("#00a9b7", "#47d110", "#d60000", "grey50")
-
-gggraph <- ggplot(earn_dat_change, 
-       aes(x = year, y = median_earnings3, color = type, alpha = type)) + 
-  geom_line() +
-  scale_colour_manual(
-    values = cPalette,
-    labels = c("city", "Louisville", "Max", "Min")) +
-  scale_alpha_manual(
-      values = c(1, 1, 1, .3),
-      labels =  c("city", "Louisville", "Max", "Min")) + 
-  theme(legend.title=element_blank()) + 
-  labs(title = 'Best and Worst Performing Cities',
-       x = 'year',
-       y = 'dollars')
-  
-graph <- ggplotly(gggraph)
-
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Change: $', round(graph$x$data[[i]]$y, 0))
-}
-
-graph
+```{r graph14}
+map_jc_zip@data <- full_join(map_jc_zip@data, map_data_zip, by = c('ZIPCODE' = 'zip'))
 ```
 
-Median earnings are now around $1,600 lower than they were in 2005.
-```{r, warning = FALSE, message = FALSE, fig.width = 9}
-gggraph <- ggplot(earn_dat_change, 
-       aes(x = year, y = change, color = type, alpha = type)) + 
-  geom_line() +
-  scale_colour_manual(
-    values = cPalette,
-    labels = c("city", "Louisville", "Max", "Min")) +
-  scale_alpha_manual(
-      values = c(1, 1, 1, .3),
-      labels =  c("city", "Louisville", "Max", "Min")) + 
-  theme(legend.title=element_blank()) + 
-  labs(title = 'Percent Change (all cities start at 0)',
-       x = 'year',
-       y = 'dollars')
-  
-graph <- ggplotly(gggraph)
+I removed some zip codes with very low population to avod skewing the numbers. I also removed downtown because it is so diffferent from everywhere else in the county: if it is included, the rest of the map is white.
 
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Change: $', round(graph$x$data[[i]]$y, 0))
-}
+**Businesses per resident**
+```{r graph14.1}
+make_map_zip("businesses_per_resident", 
+             name = "Businesses per Resident",
+             legend_title = "Businesses<br/>per res",
+             units = "none")
+```
 
-graph
+**Jobs per resident**
+```{r graph14.2}
+make_map_zip("jobs_per_resident", 
+             name = "Jobs per Resident",
+             legend_title = "Jobs<br/>per res",
+             units = "none")
+```
+
+**Payroll per resident**
+```{r graph14.3}
+make_map_zip("payroll_per_resident", 
+             name = "Payroll per Resident",
+             legend_title = "Payroll<br/>per res",
+             units = "Dollars")
+```
+
+**Payroll per worker**
+```{r graph14.4}
+make_map_zip("payroll_per_job", 
+             name = "Payroll per Worker",
+             legend_title = "Payroll<br/>per worker",
+             units = "Dollars")
+```
+
+## Unemployment trendline by race
+```{r data15}
+#White
+unemp_white <- acs_time("/data/jobs/B23002H/", starting_year = 2005)
+
+unemp_white %<>%
+  mutate(
+    total = 
+      `Estimate; Male: - 16 to 19 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 20 to 24 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 25 to 54 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 55 to 64 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 65 to 69 years: - In labor force:` +
+      `Estimate; Male: - 70 years and over: - In labor force:` +
+      `Estimate; Female: - 16 to 19 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 20 to 24 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 25 to 54 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 55 to 64 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 65 to 69 years: - In labor force:` +
+      `Estimate; Female: - 70 years and over: - In labor force:`,
+    
+    unemp_white = 
+      (`Estimate; Male: - 16 to 19 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 20 to 24 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 25 to 54 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 55 to 64 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 65 to 69 years: - In labor force: - Unemployed` + 
+      `Estimate; Male: - 70 years and over: - In labor force: - Unemployed` +
+      `Estimate; Female: - 16 to 19 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 20 to 24 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 25 to 54 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 55 to 64 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 65 to 69 years: - In labor force: - Unemployed` + 
+      `Estimate; Female: - 70 years and over: - In labor force: - Unemployed`)
+      / total * 100) %>%
+  weight_stl('unemp_white', 'total')
+
+#Black
+unemp_black <- acs_time("/data/jobs/B23002B/", starting_year = 2005)
+
+unemp_black %<>%
+  mutate(
+    total = 
+      `Estimate; Male: - 16 to 19 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 20 to 24 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 25 to 54 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 55 to 64 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 65 to 69 years: - In labor force:` +
+      `Estimate; Male: - 70 years and over: - In labor force:` +
+      `Estimate; Female: - 16 to 19 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 20 to 24 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 25 to 54 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 55 to 64 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 65 to 69 years: - In labor force:` +
+      `Estimate; Female: - 70 years and over: - In labor force:`,
+    
+    unemp_black = 
+      (`Estimate; Male: - 16 to 19 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 20 to 24 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 25 to 54 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 55 to 64 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 65 to 69 years: - In labor force: - Unemployed` + 
+      `Estimate; Male: - 70 years and over: - In labor force: - Unemployed` +
+      `Estimate; Female: - 16 to 19 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 20 to 24 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 25 to 54 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 55 to 64 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 65 to 69 years: - In labor force: - Unemployed` + 
+      `Estimate; Female: - 70 years and over: - In labor force: - Unemployed`)
+      / total * 100) %>%
+  weight_stl('unemp_black', 'total')
+
+#Hispanic
+unemp_hisp <- acs_time("/data/jobs/B23002I/", starting_year = 2005)
+
+unemp_hisp %<>%
+  mutate(
+    total = 
+      `Estimate; Male: - 16 to 19 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 20 to 24 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 25 to 54 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 55 to 64 years: - In labor force: - Civilian:` +
+      `Estimate; Male: - 65 to 69 years: - In labor force:` +
+      `Estimate; Male: - 70 years and over: - In labor force:` +
+      `Estimate; Female: - 16 to 19 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 20 to 24 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 25 to 54 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 55 to 64 years: - In labor force: - Civilian:` +
+      `Estimate; Female: - 65 to 69 years: - In labor force:` +
+      `Estimate; Female: - 70 years and over: - In labor force:`,
+    
+    unemp_hisp = 
+      (`Estimate; Male: - 16 to 19 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 20 to 24 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 25 to 54 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 55 to 64 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Male: - 65 to 69 years: - In labor force: - Unemployed` + 
+      `Estimate; Male: - 70 years and over: - In labor force: - Unemployed` +
+      `Estimate; Female: - 16 to 19 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 20 to 24 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 25 to 54 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 55 to 64 years: - In labor force: - Civilian: - Unemployed` +
+      `Estimate; Female: - 65 to 69 years: - In labor force: - Unemployed` + 
+      `Estimate; Female: - 70 years and over: - In labor force: - Unemployed`)
+      / total * 100) %>%
+  weight_stl('unemp_hisp', 'total')
+
+data %<>% bind_df(unemp_white, unemp_black, unemp_hisp)
+
+rm(unemp_white, unemp_black, unemp_hisp)
 
 ```
 
-Starting the graph in 2000 instead of 2005 reflects the general progress we made against our peers from 2000 - 2005. Only Oklahoma City, Omaha, and Tulsa ended up net positive over that timeframe. We made progress on all of our other peers except for Cincinatti in that timeframe.
-```{r, warning = FALSE, fig.width = 9, message = FALSE}
-earn_dat_change <-
-  earn_dat %>%
-  filter(year > 1999 & !is.na(median_earnings3)) %>%
-  group_by(city) %>%
-  mutate(change = median_earnings3 - first(median_earnings3)) %>%
-  ungroup() %>%
-  mutate(lou = if_else(city == 'Louisville', 0, 3),
-         max_change = max(change[year == 2016]),
-         min_change = min(change[year == 2016])) %>%
-  group_by(city) %>%
-  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
-         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
-  ungroup() %>%
-  transmute(year,
-            city,
-            median_earnings3,
-            change,
-            type = lou,
-            type = replace(type, max_city == 1, 1),
-            type = replace(type, min_city == 1, 2),
-            type = factor(type, labels = c("Louisville",
-                                           city[max_city==1&year==2016],
-                                           city[min_city==1&year==2016],
-                                           "Peer Average"))) %>%
-  group_by(type, year) %>%
-  summarise_all(mean, na.rm = TRUE)
+The survey size is too small to include Hispanic residents. I can get ahold of 3- or 5- year estimates, but it will take me a while.
+```{r graph15}
+graph_df <- data %>%
+  filter(FIPS == 21111)%>%
+  select(year, unemp_white, unemp_black, unemp_hisp)%>%
+  gather(unemp_white:unemp_hisp, 
+         key = "var", value = "value")%>%
+  arrange(var)
 
-cPalette <- c("#00a9b7", "#47d110", "#d60000", "grey50")
+graph_df$var <- factor(graph_df$var, levels = unique(graph_df$var))
 
-gggraph <- ggplot(earn_dat_change, 
-       aes(x = year, y = change, color = type, alpha = type)) + 
-  geom_line() +
-  scale_colour_manual(
-    values = cPalette,
-    labels = c("city", "Louisville", "Max", "Min")) +
-  scale_alpha_manual(
-      values = c(1, 1, 1, .3),
-      labels =  c("city", "Louisville", "Max", "Min")) + 
-  theme(legend.title=element_blank()) + 
-  labs(title = 'Percent Change (all cities start at 0)',
-       x = 'year',
-       y = 'dollars')
-  
-graph <- ggplotly(gggraph)
-
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Change: $', round(graph$x$data[[i]]$y, 0))
-}
-
-graph
+graph_trendline_race(
+  graph_df,
+  xmin = 2005,
+  xmax = 2016,
+  plot_title = "Unemployment by Ethnicity",
+  labels = c("African American", "Hispanic", "White"),
+  y_title = "Percent",
+  color_pal = wes_palette("Moonrise2"))
 ```
 
-##By Race
 
-Here, the top cluster of lines represents white residents and the bottom cluster represents black residents. We generally perform poorly in both. While median earnings for white residents have trended upwardsin the wake of the recession, earnings for black residents have remained flat. White residents are back to making as much as they were in 2005 / 2006, while black residents have largely been excluded from economic progress.
-```{r, fig.width = 9, message = FALSE}
-earn_dat_race <- earn_dat %>%
-  filter(year > 2000 & !is.na(median_earnings_white)) %>%
-  {
-    x <- .
-    bind_cols(
-      x %>% filter(city == 'Louisville'),
-      x %>% filter(city != 'Louisville') %>%
-            group_by(year) %>%
-            summarise(first_quarter_w = quantile(median_earnings_white, prob = 0.25, na.rm = TRUE),
-                      mean_w = mean(median_earnings_white, na.rm = TRUE),
-                      third_quarter_w = quantile(median_earnings_white, prob = 0.75, na.rm = TRUE),
-                      first_quarter_b = quantile(median_earnings_black, prob = 0.25, na.rm = TRUE),
-                      mean_b = mean(median_earnings_black, na.rm = TRUE),
-                      third_quarter_b = quantile(median_earnings_black, prob = 0.75, na.rm = TRUE)) %>%
-        ungroup()
-    )
-  } %>%
-  select(year, 
-         median_earnings_white, median_earnings_black,
-         first_quarter_w, first_quarter_b, 
-         mean_w, mean_b, 
-         third_quarter_w, third_quarter_b) %>%
-  melt(id = 'year') 
+### Working poverty
 
-earn_dat_race$variable <- factor(earn_dat_race$variable, labels = c("White", "Black", "White 25%", "Black 25%", "White mean", "Black mean", "75% White", "75% Black"))
-  
-  #initial line plot
-  p <- ggplot(data=earn_dat_race, aes(x = year, y = value, colour = variable, linetype = variable))+
-    geom_point(size = 1)+
-    geom_line(size = .6)
-  p <- p + theme_bw()
-  midpoint <- (max(earn_dat_race$value, na.rm = TRUE)+min(earn_dat_race$value, na.rm = TRUE))/2
-  border_space <- .1 * midpoint
-  p <- p + ylim(c(min(earn_dat_race$value, na.rm = TRUE) - border_space, max(earn_dat_race$value, na.rm=TRUE) + border_space))
+### Income inequality
 
-  #add color and line types
-  cPalette <- c("#00a9b7", "#00a9b7", "grey50", "grey50", "black", "black", "grey50", "grey50")
-  p <- p + scale_colour_manual(
-    values = cPalette
-  ) +
-    scale_linetype_manual(
-      values = c("solid", "solid", "dashed", "dashed", "dashed", "dashed", "dashed", "dashed")
-    )
-  
-  #add remaining style and elements
-  p<-p+theme(text = element_text(family = "Museo Sans 300"),
-             legend.title=element_blank(),
-             legend.position = "none",
-             axis.text=element_text(size=12, family = "Museo Sans 300"),
-             axis.ticks.y=element_blank(),
-             plot.title=element_text(size=18, hjust=.5, family = "Museo Sans 300",
-                                     margin=margin(b=10,unit="pt")),
-             legend.text=element_text(size=12, family = "Museo Sans 300"),
-             plot.caption = element_text(family = "Museo Sans 300"),
-             plot.subtitle = element_text(family = "Museo Sans 300", hjust = 0.5))
-  p<-p+labs(title = "Median Earnings by Race",
-            y = "Dollars",
-            x = "Year")
-  
-graph <- ggplotly(p)
+# Health: health outcomes index {.tabset}
 
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Dollars: $', round(graph$x$data[[i]]$y, 0))
-}
+## Ranking
 
-graph
-```
+## Trendline by race
 
-The earnings gap in Louisville is relatively large compared to our peers. Looking at the earnings gap as a percentag vs. raw dollar amount makes no difference. Black workers make around $59 cents for every dollar white workers earn. This does not take into consideration the higher unemployment rate among black residents.
-```{r, message = FALSE, warning = FALSE}
-race_gap <- earn_dat %>%
-  filter(year > 2000) %>%
-  mutate(gap = median_earnings_white - median_earnings_black,
-         adjusted_gap = gap / median_earnings3 * 100)
+## Map of life expectancy
 
-rank_and_nb_group(race_gap[race_gap$year == 2016,],
-                  'gap',
-                  order = "Ascending",
-                  y_title = "Dollars",
-                  plot_title = 'Earnings Gap, 2016 ($)')
+## Change; % of children in poverty
 
-rank_and_nb_group(race_gap[race_gap$year == 2016,],
-                  'adjusted_gap',
-                  order = "Ascending",
-                  y_title = "Percent",
-                  plot_title = 'Earnings Gap, 2016 (%)')
-```
+## Other:
 
-The earnings gap is persistent and increasing
-```{r, message = FALSE, warning = FALSE, fig.width = 9}
-gggraph <- graph_trendline(race_gap, 
-                'gap',
-                plot_title = 'Earnings Gap Between White and Black Residents ($)',
-                xmax = 2016,
-                y_title = "Dollars") +
-  theme(legend.position = "none")
+### Health insurance by race
 
-graph <- ggplotly(gggraph)
+### Health insurance by income quartiles (demonstrate impact of expanded Medicaid)
 
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Dollars: $', round(graph$x$data[[i]]$y, 0))
-}
+# QOP {.tabset}
 
-graph
+## Ranking: homeownership
 
-gggraph <- graph_trendline(race_gap, 
-                'adjusted_gap',
-                plot_title = 'Earnings Gap Between White and Black Residents (%)',
-                xmax = 2016,
-                y_title = "Percent") +
-  theme(legend.position = "none")
+## Trendline: homeownership by race
 
-graph <- ggplotly(gggraph)
+## Map: homeownership or burdened households
 
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Percent: ', round(graph$x$data[[i]]$y, 1), "%")
-}
+## change: home values by areas
 
-graph
-```
+## Other
 
-##Geography
-[Here is a link where you can see median earnings across the county.](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Maps/jobs_maps/jobs_median_earnings_map.html)
+### % of MSA in core county
 
+### Housing stock $ by race
 
-# **Quality of Place**
-```{r, include = FALSE}
-qop_data <- read_csv('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/output data/qp_data_fips.csv')
-```
+### Segregation = % race by % area
 
-**Louisville and our peer cities are becoming les racially segregated.**
+### Brain drain migration figures
 
-##Ranking
-The percentage of residents living in the core county is not a particularly useful ranking since it just depends on how big the county is, but...here it is.
-![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/QP_Images/qp_pct_pop_core_county.png)
-
-##Trendline
-Our percentage and that of our peers is generally pretty constant over time.
-Brookings pointed out that many people seemed to be moving from the core city to the regional city. This does not seem to be an issue for us. The percentage of residents living in the core city (inside the Watterson) remained around 32.5% from 2007 to 2013.
-![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/QP_Images/pct_pop_living_in_core_county_trendline.png)
-
-## Racial Dissimilarity
-The racial dissimilarity index is the percentage of residents who would have to move for residents of all races to be evenly distributed throughout the city.
-Louisville's segregation index decreased by about 2.5 percentage points over that time period. Our best-performing peers saw decreases of 3 to 3.5 percentage points. 
-![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/QP_Images/qp_racial_geography_rankings.png)
-![](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/QP_Images/qp_racial_geography_trendline.png)
-![](C:/Users/Harrison Kirby/Downloads/racial_dissimilarity.png)
-
-# **Health**
-```{r, include = FALSE}
-health_data <- read_csv('C:/Users/Harrison Kirby/Desktop/GLP/glp_website/output data/health_data_redux.csv') %>% mutate(FIPS = as.numeric(FIPS))
-
-qop_data <- qop_data %>% filter(year == 2016) %>% select(FIPS, city)
-
-health_data <- left_join(health_data, qop_data, by = 'FIPS')
-```
-
-This is a weak spot for us in terms of data, so I will investigate what is avilable and can be broken down by race.
-
-##Poor or Fair Health
-The poor or fair health measures the percentage of people who descibe their health as such, instead of good, very good, or excellent.
-
-![Poor or Fair](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Health_Images/poor_or_fair_trendline.png)
-![Poor or Fair](C:/Users/Harrison Kirby/Desktop/GLP/glp_website/Images/Health_Images/poor_or_fair_ranking.png)
-
-Louisville's performance on this measure has declined by a few percentage points over the past decade.  
-```{r, warning = FALSE, message = FALSE, fig.width = 9}
-health_data_change <-
-  health_data %>%
-  filter(current == 1) %>%
-  filter(year > 2004) %>%
-  filter(!is.na(poor_or_fair)) %>%
-  group_by(city) %>%
-  mutate(change = poor_or_fair - first(poor_or_fair)) %>%
-  ungroup() %>%
-  mutate(lou = if_else(city == 'Louisville', 0, 3),
-         max_change = max(change[year == 2016]),
-         min_change = min(change[year == 2016])) %>%
-  group_by(city) %>%
-  mutate(max_city = if_else(change[year == 2016] == max_change, 1, 0),
-         min_city = if_else(change[year == 2016] == min_change, 1, 0)) %>%
-  ungroup() %>%
-  transmute(year,
-            city,
-            poor_or_fair = poor_or_fair * 100,
-            change = change * 100,
-            type = lou,
-            type = replace(type, max_city == 1, 1),
-            type = replace(type, min_city == 1, 2),
-            type = factor(type, labels = c("Louisville",
-                                           city[max_city==1&year==2016],
-                                           city[min_city==1&year==2016],
-                                           "Peer Average"))) %>%
-  group_by(type, year) %>%
-  summarise_all(mean, na.rm = TRUE)
-
-cPalette <- c("#00a9b7", "#d60000", "#47d110", "grey50")
-
-gggraph <- ggplot(health_data_change, 
-       aes(x = year, y = poor_or_fair, color = type, alpha = type)) + 
-  geom_line() +
-  scale_colour_manual(
-    values = cPalette,
-    labels = c("city", "Louisville", "Max", "Min")) +
-  scale_alpha_manual(
-      values = c(1, 1, 1, .3),
-      labels =  c("city", "Louisville", "Max", "Min")) + 
-  theme(legend.title=element_blank()) + 
-  labs(title = 'Best and Worst Performing Cities',
-       x = 'year',
-       y = 'percent')
-  
-graph <- ggplotly(gggraph)
-
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "%")
-}
-
-graph
-```
-
-Standardizing the change to the same starting place shows that our poor or fair health measure increased by marginally more than our peer city average: The average peer city saw an increase of 2.5 percentage points, while ours increased by 3.1 percentage points.
-```{r, message = FALSE, fig.widh = 9}
-gggraph <- ggplot(health_data_change, 
-       aes(x = year, y = change, color = type, alpha = type)) + 
-  geom_line() +
-  scale_colour_manual(
-    values = cPalette,
-    labels = c("city", "Louisville", "Max", "Min")) +
-  scale_alpha_manual(
-      values = c(1, 1, 1, .3),
-      labels =  c("city", "Louisville", "Max", "Min")) + 
-  theme(legend.title=element_blank()) + 
-  labs(title = 'Best and Worst Performing Cities',
-       x = 'year',
-       y = 'percentage points')
-  
-graph <- ggplotly(gggraph)
-
-for(i in 1:length(graph$x$data)){
-  graph$x$data[[i]]$text <- paste0(graph$x$data[[i]]$name, 
-                                   '<br>Year: ', graph$x$data[[i]][['x']], 
-                                   '<br>Change: ', round(graph$x$data[[i]]$y, 1), "percentage points")
-}
-
-graph
-```
+### Disconnected youth figures
 
 
